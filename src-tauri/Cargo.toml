@@ -1,6 +1,6 @@
 [package]
 name = "idlr"
-version = "2.0.3"
+version = "2.0.4"
 description = "IDLR App Internet Downloader"
 authors = ["IDLR"]
 license = "MIT"

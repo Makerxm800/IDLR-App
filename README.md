@@ -10,7 +10,7 @@ Everything runs locally on your machine.
 ![yt‑dlp](https://img.shields.io/badge/yt--dlp-latest-orange)
 ![spotdl](https://img.shields.io/badge/spotdl-latest-brightgreen)
 
-> **Current version: v2.0.3** — a native Tauri desktop app with a bundled media worker, plus a local browser option. Both use the same features and local data, with layouts designed for their respective screens.
+> **Current version: v2.0.4** — a native Tauri desktop app with a bundled media worker, plus a local browser option. Both use the same features and local data, with layouts designed for their respective screens.
 
 [Download the latest Windows setup](https://github.com/Makerxm800/IDLR-App/releases/latest/download/IDLR-App-Setup.exe) · [All releases](https://github.com/Makerxm800/IDLR-App/releases)
 
@@ -87,7 +87,7 @@ The Settings panel keeps **Update download engine** for yt-dlp/spotdl and has a 
 
 The release workflow targets `Makerxm800/IDLR-App`. Generate the signing key once with `npm run tauri -- signer generate -w "$env:USERPROFILE\.tauri\idlr-updater.key"`; the public key is already configured in `src-tauri/tauri.conf.json`. Keep a secure backup of the private key: losing it prevents future updates. Do not commit it or share it in chat. Before publishing, add the private key contents as the repository Actions secret `TAURI_SIGNING_PRIVATE_KEY`. If you protect the key with a password, also add `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` as an Actions secret. The local build commands above use the key file path; CI uses the secret contents.
 
-Push a matching version tag (for example `v2.0.3`). GitHub Actions builds signed Windows, Linux, and macOS packages, publishes the Windows setup, Linux AppImage, macOS DMG and macOS updater archive, and removes stale build files from that release. The updater manifest includes its package signatures, so standalone signature files are not needed in the release downloads.
+Push a matching version tag (for example `v2.0.4`). GitHub Actions builds signed Windows, Linux, and macOS packages, runs the test suite, publishes the Windows setup, Linux AppImage, macOS DMG and macOS updater archive, and removes stale build files from that release. The updater manifest includes its package signatures, so standalone signature files are not needed in the release downloads.
 
 ### Run from source
 
@@ -253,6 +253,11 @@ idlr/
 ---
 
 ## 📜 Changelog
+
+### v2.0.4 — release test fixes
+
+- Fixed updater-manifest tests so they always use the configured app version.
+- Added the full test suite to every platform release build before packaging.
 
 ### v2.0.3 — guest access and interface fixes
 

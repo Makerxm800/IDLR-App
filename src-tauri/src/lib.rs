@@ -18,7 +18,7 @@ use std::{
 use tauri::{AppHandle, Manager, State};
 use tauri_plugin_updater::UpdaterExt;
 
-const APP_VERSION: &str = "2.0.3";
+const APP_VERSION: &str = "2.0.4";
 const MAX_HTTP_HEADER_BYTES: usize = 16 * 1024;
 const MAX_HTTP_BODY_BYTES: usize = 1024 * 1024;
 static TEMP_FILE_SEQUENCE: AtomicU64 = AtomicU64::new(0);

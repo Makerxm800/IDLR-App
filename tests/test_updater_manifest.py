@@ -1,9 +1,14 @@
+import json
 import tempfile
 import unittest
 from pathlib import Path
 from urllib.parse import unquote
 
 from scripts.create_updater_manifest import create_manifest, normalize_target
+
+
+TAURI_CONFIG = Path(__file__).resolve().parents[1] / "src-tauri" / "tauri.conf.json"
+VERSION = json.loads(TAURI_CONFIG.read_text(encoding="utf-8"))["version"]
 
 
 class UpdaterManifestTests(unittest.TestCase):
@@ -16,8 +21,8 @@ class UpdaterManifestTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp_dir:
             artifacts = Path(temp_dir)
             packages = {
-                "Windows": ("X64", "nsis/IDLR App_2.0.2_x64-setup.exe"),
-                "Linux": ("X64", "appimage/IDLR App_2.0.2_amd64.AppImage"),
+                "Windows": ("X64", f"nsis/IDLR App_{VERSION}_x64-setup.exe"),
+                "Linux": ("X64", f"appimage/IDLR App_{VERSION}_amd64.AppImage"),
                 "macOS": ("ARM64", "macos/IDLR.app.tar.gz"),
             }
             for os_name, (architecture, relative_package) in packages.items():
@@ -36,24 +41,24 @@ class UpdaterManifestTests(unittest.TestCase):
                 )
 
             manifest = create_manifest(
-                "v2.0.2",
+                f"v{VERSION}",
                 "Makerxm800/IDLR-App",
                 artifacts,
             )
 
-        self.assertEqual(manifest["version"], "2.0.2")
+        self.assertEqual(manifest["version"], VERSION)
         self.assertEqual(
             set(manifest["platforms"]),
             {"windows-x86_64", "linux-x86_64", "darwin-aarch64"},
         )
         self.assertTrue(
             unquote(manifest["platforms"]["windows-x86_64"]["url"]).endswith(
-                "IDLR.App_2.0.2_x64-setup.exe"
+                f"IDLR.App_{VERSION}_x64-setup.exe"
             )
         )
         self.assertTrue(
             unquote(manifest["platforms"]["linux-x86_64"]["url"]).endswith(
-                "IDLR.App_2.0.2_amd64.AppImage"
+                f"IDLR.App_{VERSION}_amd64.AppImage"
             )
         )
         self.assertTrue(
@@ -88,7 +93,7 @@ class UpdaterManifestTests(unittest.TestCase):
 
             with self.assertRaisesRegex(ValueError, "missing a signed"):
                 create_manifest(
-                    "v2.0.2",
+                    f"v{VERSION}",
                     "Makerxm800/IDLR-App",
                     artifacts,
                 )
