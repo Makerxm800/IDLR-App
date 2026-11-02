@@ -332,6 +332,30 @@
             gap: 12px;
             margin-bottom: 8px
         }
+        .beta-badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 4px;
+            padding: 4px 7px;
+            border: 1px solid rgba(255, 91, 86, .32);
+            border-radius: 999px;
+            background: rgba(255, 91, 86, .1);
+            color: #ff8580;
+            font: 700 8px/1 'DM Sans', sans-serif;
+            letter-spacing: .1em;
+            text-transform: uppercase;
+            white-space: nowrap;
+            vertical-align: middle;
+        }
+        .beta-badge-mark {
+            font-size: 11px;
+            line-height: .8;
+        }
+        .brand-line {
+            display: flex;
+            align-items: center;
+            gap: 7px;
+        }
         .logo-name {
             font-family: 'Unbounded', sans-serif;
             font-size: 24px;
@@ -577,6 +601,10 @@
             font-size: 9px;
             color: var(--fg3);
             margin-top: 1px
+        }
+        .tbar-logo .beta-badge {
+            padding: 4px 6px;
+            font-size: 7px;
         }
         /* ── main nav: glass segmented control with sliding pill ──
            (deliberately different from the history sub-tabs, which use a
@@ -2034,7 +2062,10 @@
             align-items: center;
             gap: 14px;
             transition: all .22s;
-            animation: itemSlide .3s cubic-bezier(.2, .9, .4, 1.1) both
+            animation: itemSlide .3s cubic-bezier(.2, .9, .4, 1.1) both;
+            min-width: 0;
+            position: relative;
+            isolation: isolate;
         }
         @keyframes itemSlide {
             from {
@@ -2047,11 +2078,11 @@
             }
         }
         .hist-item:hover {
+            z-index: 3;
             background: linear-gradient(110deg, rgba(36,36,36,.82), rgba(18,18,18,.86));
             border-color: rgba(255, 255, 255, 0.14);
             box-shadow: 0 10px 28px rgba(0,0,0,.18);
             transform: translateY(-1px);
-            transform: translateX(4px)
         }
         .hist-item.selected {
             border-color: rgba(255, 32, 32, .3);
@@ -2143,6 +2174,7 @@
         .hist-title {
             font-size: 13px;
             font-weight: 600;
+            line-height: 1.35;
             white-space: nowrap;
             overflow: hidden;
             text-overflow: ellipsis
@@ -2165,28 +2197,65 @@
         }
         .hist-btns {
             display: flex;
-            gap: 5px;
-            flex-shrink: 0;
+            align-items: center;
+            gap: 6px;
+            flex: 0 0 auto;
+            margin-left: auto;
         }
         .hbtn {
-            padding: 4px 10px;
-            border: 1px solid rgba(255, 255, 255, 0.08);
-            border-radius: 999px;
-            background: transparent;
+            width: 38px;
+            height: 38px;
+            padding: 0;
+            border: 1px solid var(--bdr);
+            border-radius: 12px;
+            background: var(--s3);
             color: var(--fg3);
             font-family: 'DM Sans', sans-serif;
-            font-size: 10px;
+            font-size: 15px;
             cursor: pointer;
-            transition: all .18s;
+            transition: color .18s, background .18s, border-color .18s, transform .18s, box-shadow .18s;
             white-space: nowrap;
-            display: inline-flex;
+            display: inline-grid;
             align-items: center;
-            gap: 4px;
+            justify-items: center;
+            position: relative;
+            flex: 0 0 38px;
         }
-        .hbtn:hover {
-            background: rgba(255, 255, 255, 0.06);
+        .hbtn::after {
+            content: attr(data-tooltip);
+            position: absolute;
+            left: 50%;
+            top: calc(100% + 8px);
+            z-index: 30;
+            padding: 6px 9px;
+            border: 1px solid var(--bdr2);
+            border-radius: 8px;
+            background: var(--card);
             color: var(--fg);
-            transform: translateY(-1px);
+            box-shadow: 0 8px 22px rgba(0, 0, 0, .28);
+            font: 600 10px/1.2 'DM Sans', sans-serif;
+            opacity: 0;
+            visibility: hidden;
+            pointer-events: none;
+            transform: translate(-50%, 4px);
+            transition: opacity .16s ease, transform .16s ease, visibility .16s ease;
+        }
+        .hbtn:hover,
+        .hbtn:focus-visible {
+            background: var(--s4);
+            color: var(--fg);
+            border-color: var(--bdr2);
+            transform: translateY(-2px);
+            box-shadow: 0 5px 14px rgba(0, 0, 0, .2);
+        }
+        .hbtn:hover::after,
+        .hbtn:focus-visible::after {
+            opacity: 1;
+            visibility: visible;
+            transform: translate(-50%, 0);
+        }
+        .hbtn:active {
+            transform: scale(.94);
         }
         .hbtn.del:hover {
             border-color: rgba(255, 32, 32, .3);
@@ -2197,6 +2266,12 @@
             border-color: rgba(30, 215, 96, .3);
             color: var(--grn);
             background: rgba(30, 215, 96, .06);
+        }
+        .hbtn.star:hover,
+        .hbtn.star:focus-visible {
+            border-color: rgba(255, 200, 40, .4);
+            color: #ffc828;
+            background: rgba(255, 200, 40, .08);
         }
         .empty-state {
             text-align: center;
@@ -2375,8 +2450,8 @@
 
         /* Premium animated toggle (spring knob + glow pop) */
         .toggle-switch {
-            width: 48px;
-            height: 28px;
+            width: 46px;
+            height: 26px;
             border-radius: 999px;
             background: rgba(255, 255, 255, 0.06);
             border: 1px solid rgba(255, 255, 255, 0.08);
@@ -2386,6 +2461,34 @@
             transition: background .3s, border-color .3s, box-shadow .3s, transform .15s;
             box-shadow: inset 0 1px 3px rgba(0,0,0,0.3);
             backdrop-filter: blur(4px);
+            z-index: 2;
+        }
+        .toggle-switch::after {
+            content: attr(data-tooltip);
+            position: absolute;
+            left: 50%;
+            bottom: calc(100% + 8px);
+            z-index: 20;
+            padding: 6px 9px;
+            border: 1px solid var(--bdr2);
+            border-radius: 8px;
+            background: var(--card);
+            color: var(--fg);
+            box-shadow: 0 8px 22px rgba(0, 0, 0, .28);
+            font: 600 10px/1.2 'DM Sans', sans-serif;
+            white-space: nowrap;
+            opacity: 0;
+            visibility: hidden;
+            pointer-events: none;
+            transform: translate(-50%, 4px);
+            transition: opacity .16s ease, transform .16s ease, visibility .16s ease;
+        }
+        .toggle-switch:hover::after,
+        .toggle-switch:focus-visible::after,
+        .setting-row:focus-visible .toggle-switch::after {
+            opacity: 1;
+            visibility: visible;
+            transform: translate(-50%, 0);
         }
         .toggle-switch:hover {
             transform: scale(1.06);
@@ -2412,8 +2515,8 @@
             position: absolute;
             top: 2px;
             left: 2px;
-            width: 22px;
-            height: 22px;
+            width: 20px;
+            height: 20px;
             border-radius: 50%;
             background: rgba(255,255,255,0.95);
             box-shadow: 0 2px 8px rgba(0,0,0,0.4);
@@ -2426,7 +2529,11 @@
         }
 
         /* ── hover sheen (mouse VFX on settings rows + theme cards) ── */
-        .setting-row,
+        .setting-row {
+            position: relative;
+            overflow: visible;
+            isolation: isolate;
+        }
         .theme-option {
             position: relative;
             overflow: hidden;
@@ -2440,9 +2547,20 @@
             width: 45%;
             height: 100%;
             background: linear-gradient(100deg, transparent, var(--redglow), transparent);
+            clip-path: inset(0 round 16px);
             transform: skewX(-15deg);
             transition: left .55s ease;
             pointer-events: none;
+            z-index: 0;
+        }
+        .setting-row > :not(.setting-row-right),
+        .setting-row-right {
+            position: relative;
+            z-index: 1;
+        }
+        .setting-row:hover,
+        .setting-row:focus-within {
+            z-index: 5;
         }
         .setting-row:hover::after,
         .theme-option:hover::after {
@@ -2559,7 +2677,7 @@
             .hist-tab { padding: 9px 7px; font-size: 11px; }
             .hist-item { flex-wrap: wrap; gap: 9px; padding: 10px; border-radius: 13px; }
             .hist-item .hist-info { flex-basis: calc(100% - 82px); }
-            .hist-item .hist-btns { width: 100%; justify-content: flex-end; }
+            .hist-item .hist-btns { width: 100%; justify-content: flex-end; padding-top: 2px; }
             .profile-modal { width: 100%; max-width: 100%; max-height: 92dvh; border-radius: 22px 22px 0 0; }
         }
 
@@ -3492,6 +3610,7 @@
         @media (max-width: 560px) {
             body.web-shell .topbar { position: relative; }
             body.web-shell .footer-bar { padding: 8px 14px; }
+            .tbar-logo .beta-badge { display: none; }
         }
 
         /* Consistent theme tokens and interaction feedback across both shells. */
@@ -3784,6 +3903,7 @@
                     <div class="logo-row">
                         <svg width="44" height="44" viewBox="0 0 64 64" aria-hidden="true"><defs><linearGradient id="idlr-mark" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#ff5b56"/><stop offset="1" stop-color="#d9133b"/></linearGradient></defs><rect width="64" height="64" rx="19" fill="url(#idlr-mark)"/><path d="M32 14v23m0 0 9-9m-9 9-9-9M19 45h26" fill="none" stroke="#fff" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"/></svg>
                         <span class="logo-name">IDLR</span>
+                        <span class="beta-badge" title="IDLR is in beta"><span class="beta-badge-mark">β</span> Beta</span>
                     </div>
                     <div class="logo-sub">Your private media workspace</div>
                 </div>
@@ -4036,7 +4156,10 @@
             <div class="topbar">
                 <div class="tbar-logo" onclick="gotoTab('dl')">
                     <svg width="30" height="30" viewBox="0 0 64 64" aria-hidden="true"><defs><linearGradient id="idlr-mark-nav" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#ff5b56"/><stop offset="1" stop-color="#d9133b"/></linearGradient></defs><rect width="64" height="64" rx="19" fill="url(#idlr-mark-nav)"/><path d="M32 14v23m0 0 9-9m-9 9-9-9M19 45h26" fill="none" stroke="#fff" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"/></svg>
-                    <div><div class="tbar-name-short">IDLR</div><div class="tbar-name-full">Internet Downloader</div></div>
+                    <div>
+                        <div class="brand-line"><div class="tbar-name-short">IDLR</div><span class="beta-badge" title="IDLR is in beta"><span class="beta-badge-mark">β</span> Beta</span></div>
+                        <div class="tbar-name-full">Internet Downloader</div>
+                    </div>
                 </div>
                 <nav class="topnav" id="topnav">
                     <button class="nav-btn active" data-tab="dl" aria-current="page" onclick="gotoTab('dl')">⬇ Download</button>
@@ -6073,12 +6196,12 @@
               </div>
               <div class="hist-btns">
                 ${inTrash
-                    ? `<button class="hbtn rename" onclick="restoreHist(decodeURIComponent('${su}'))" title="Restore">↩</button>
-                       <button class="hbtn del" onclick="deleteForeverHist(decodeURIComponent('${su}'),this)" title="Delete forever">✖</button>`
-                    : `<button class="hbtn star${item.starred ? ' lit' : ''}" onclick="toggleStar(decodeURIComponent('${su}'))" title="Favorite">★</button>
-                       <button class="hbtn rename" onclick="renameHist(decodeURIComponent('${su}'))">📝</button>
-                       <button class="hbtn" onclick="redl(decodeURIComponent('${su}'))">↺</button>
-                       <button class="hbtn del" onclick="removeHist(decodeURIComponent('${su}'),this)">🗑</button>`}
+                    ? `<button type="button" class="hbtn rename" onclick="restoreHist(decodeURIComponent('${su}'))" data-tooltip="Restore download" aria-label="Restore download">↩</button>
+                       <button type="button" class="hbtn del" onclick="deleteForeverHist(decodeURIComponent('${su}'),this)" data-tooltip="Delete forever" aria-label="Delete forever">✖</button>`
+                    : `<button type="button" class="hbtn star${item.starred ? ' lit' : ''}" onclick="toggleStar(decodeURIComponent('${su}'))" data-tooltip="${item.starred ? 'Remove favorite' : 'Add favorite'}" aria-label="${item.starred ? 'Remove favorite' : 'Add favorite'}" aria-pressed="${item.starred ? 'true' : 'false'}">★</button>
+                       <button type="button" class="hbtn rename" onclick="renameHist(decodeURIComponent('${su}'))" data-tooltip="Rename download" aria-label="Rename download">📝</button>
+                       <button type="button" class="hbtn" onclick="redl(decodeURIComponent('${su}'))" data-tooltip="Download again" aria-label="Download again">↺</button>
+                       <button type="button" class="hbtn del" onclick="removeHist(decodeURIComponent('${su}'),this)" data-tooltip="Move to trash" aria-label="Move to trash">🗑</button>`}
               </div>`;
                 el.appendChild(row);
             });
@@ -6640,7 +6763,12 @@
                 const row = document.getElementById('row-' + key);
                 if (row) row.classList.toggle('is-on', !!_settingsState[key]);
                 const t = document.getElementById('toggle-' + key);
-                if (t) t.setAttribute('aria-checked', _settingsState[key] ? 'true' : 'false');
+                if (t) {
+                    const settingName = _settingHints[key] ? _settingHints[key][0] : key;
+                    t.dataset.tooltip = `${settingName}: ${_settingsState[key] ? 'Enabled' : 'Disabled'}`;
+                    t.setAttribute('aria-hidden', 'true');
+                    t.setAttribute('aria-checked', _settingsState[key] ? 'true' : 'false');
+                }
                 const sub = document.getElementById('sub-' + key);
                 if (sub && _settingSubs[key]) sub.textContent = _settingSubs[key][_settingsState[key] ? 0 : 1];
             });
