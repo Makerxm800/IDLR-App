@@ -2,12 +2,22 @@ name: Build IDLR App releases
 
 on:
   workflow_dispatch:
+    inputs:
+      publish_from_run_id:
+        description: Optional successful build run ID to publish without rebuilding
+        required: false
+        type: string
+      release_tag:
+        description: Release tag to publish when reusing build artifacts
+        required: false
+        type: string
   push:
     tags:
       - "v*"
 
 jobs:
   build:
+    if: github.event_name != 'workflow_dispatch' || inputs.publish_from_run_id == ''
     name: Build (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
     strategy:
@@ -81,10 +91,20 @@ jobs:
           if-no-files-found: error
 
   publish:
-    if: startsWith(github.ref, 'refs/tags/v')
+    if: >-
+      always() &&
+      (
+        startsWith(github.ref, 'refs/tags/v') ||
+        (github.event_name == 'workflow_dispatch' && inputs.publish_from_run_id != '')
+      ) &&
+      (
+        needs.build.result == 'success' ||
+        (github.event_name == 'workflow_dispatch' && inputs.publish_from_run_id != '' && needs.build.result == 'skipped')
+      )
     needs: build
     runs-on: ubuntu-latest
     permissions:
+      actions: read
       contents: write
     steps:
       - uses: actions/checkout@v7
@@ -97,11 +117,13 @@ jobs:
         with:
           path: release-assets
           merge-multiple: true
+          run-id: ${{ inputs.publish_from_run_id || github.run_id }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Create signed updater manifest
         run: >
           python scripts/create_updater_manifest.py
-          --tag "${{ github.ref_name }}"
+          --tag "${{ inputs.release_tag || github.ref_name }}"
           --repository "${{ github.repository }}"
           --artifacts release-assets
           --output release-assets/latest.json
@@ -130,6 +152,6 @@ jobs:
       - name: Publish GitHub release
         uses: softprops/action-gh-release@v3
         with:
-          tag_name: ${{ github.ref_name }}
+          tag_name: ${{ inputs.release_tag || github.ref_name }}
           generate_release_notes: true
           files: release-publish/*
