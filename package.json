@@ -1,7 +1,7 @@
 {
   "name": "idlr-app",
   "private": true,
-  "version": "2.0.2",
+  "version": "2.0.3",
   "scripts": {
     "prepare:frontend": "python scripts/prepare_frontend.py",
     "tauri": "tauri"
