@@ -518,6 +518,33 @@
             border-color: var(--blue);
             transform: translateY(-1px)
         }
+        .btn-guest {
+            width: 100%;
+            min-height: 42px;
+            margin-top: 9px;
+            border: 1px solid var(--bdr2);
+            border-radius: 999px;
+            background: var(--s3);
+            color: var(--fg2);
+            font: 600 12px 'DM Sans', sans-serif;
+            cursor: pointer;
+            transition: background .18s ease, border-color .18s ease, color .18s ease, transform .18s ease;
+        }
+        .btn-guest:hover {
+            background: var(--s4);
+            border-color: var(--bdr2);
+            color: var(--fg);
+            transform: translateY(-1px);
+        }
+        .guest-note {
+            margin: 9px 4px 0;
+            color: var(--fg3);
+            font-size: 10px;
+            line-height: 1.5;
+            text-align: center;
+        }
+        body.guest-mode .pop-edit-hint,
+        body.guest-mode #delete-account-setting { display: none; }
         .auth-switch {
             text-align: center;
             margin-top: 16px;
@@ -2113,6 +2140,9 @@
             align-items: center;
             justify-content: center;
             font-size: 11px;
+            line-height: 1;
+            color: var(--fg2);
+            padding: 0;
             transition: all .18s;
             flex-shrink: 0
         }
@@ -4088,6 +4118,8 @@
                     <button class="btn-red" id="auth-btn" onclick="doAuth()">Sign In</button>
                     <div class="or-row">or</div>
                     <button class="btn-google" onclick="showGDlg()">🔵 Continue with Google</button>
+                    <button class="btn-guest" type="button" onclick="continueAsGuest()">Continue as guest</button>
+                    <p class="guest-note">Browse and download without an account. Guest history stays on this device.</p>
                     <div class="auth-switch"><span id="sw-txt">No account?</span><a id="sw-link" onclick="toggleAuthMode()"> Create one</a></div>
                 </div>
                 <div class="login-footer">
@@ -4609,7 +4641,7 @@
                                 <input type="text" id="hist-search" placeholder="Search history…" oninput="filterHistory()" />
                                 <button class="clear-search" id="clear-search-btn" onclick="clearSearch()">✕</button>
                             </div>
-                            <button class="pill outline" id="select-toggle-btn" onclick="toggleSelectMode()" style="font-size:11px">☑ Select</button>
+                            <button class="pill outline" id="select-toggle-btn" type="button" onclick="toggleSelectMode()" aria-pressed="false" style="font-size:11px">☑ Select</button>
                             <button class="pill outline" id="clear-all-btn" onclick="clearHist()">🗑 Clear All</button>
                             <button class="pill outline" id="trash-restore-btn" onclick="restoreAllTrash()" style="display:none">↩ Restore All</button>
                             <button class="pill outline" id="trash-empty-btn" onclick="emptyTrash()" style="display:none">🗑 Empty Trash</button>
@@ -4847,7 +4879,7 @@
                             <div class="toggle-switch on" id="toggle-saveLogins"><div class="toggle-knob"></div></div>
                         </div>
                     </div>
-                    <div class="setting-row" onclick="confirmDeleteAccount()">
+                    <div class="setting-row" id="delete-account-setting" onclick="confirmDeleteAccount()">
                         <div class="setting-row-ico" style="background:rgba(255,32,32,.1);color:var(--red)">🗑</div>
                         <div class="setting-row-text">
                             <div class="setting-row-title">Delete Account</div>
@@ -5544,10 +5576,43 @@
                     err.style.display = 'block'; } }
         }
 
+        function continueAsGuest() {
+            let guestId = '';
+            try {
+                    guestId = localStorage.getItem('idlr_guest_id') || '';
+                    if (!guestId) {
+                        guestId = globalThis.crypto?.randomUUID
+                            ? globalThis.crypto.randomUUID()
+                            : `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+                        localStorage.setItem('idlr_guest_id', guestId);
+                    }
+            } catch (error) {
+                    console.warn('Could not persist guest identity:', error);
+                    guestId = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+            }
+
+            let prefs = {};
+            try {
+                    prefs = JSON.parse(localStorage.getItem('idlr_guest_prefs') || '{}');
+                    if (!prefs || typeof prefs !== 'object' || Array.isArray(prefs)) prefs = {};
+            } catch (error) {
+                    console.warn('Could not load guest preferences:', error);
+            }
+            launch({
+                    name: 'Guest',
+                    email: `guest:${guestId}`,
+                    method: 'guest',
+                    isGuest: true,
+                    prefs
+            });
+        }
+
         /* ══ LAUNCH / SESSION ══ */
         function launch(user, isRestore = false) {
             if (!user || !user.email) { console.warn('launch: invalid user'); return; }
             U = user;
+            const mainApp = document.getElementById('main-app');
+            document.body.classList.toggle('guest-mode', Boolean(user.isGuest));
             // Save session only if the "Save Login Session" toggle is ON
             const wantSave = (typeof _settingsState === 'undefined') ? true : _settingsState.saveLogins !== false;
             if (wantSave) {
@@ -5556,9 +5621,11 @@
             } else {
                 try { localStorage.removeItem('idlr_u'); } catch (e) {}
             }
-            try { saveAccountToList(user); } catch (e) {}
+            if (!user.isGuest) {
+                try { saveAccountToList(user); } catch (e) {}
+            }
             document.getElementById('login-screen').style.display = 'none';
-            document.getElementById('main-app').classList.add('on');
+            mainApp.classList.add('on');
             try { fillUserUI(); } catch (e) { console.warn('fillUserUI error', e); }
             try { applyPrefs(user.prefs || {}); } catch (e) {}
             const storedPath = localStorage.getItem('idlr_savepath');
@@ -5592,6 +5659,10 @@
         /* ══ DELETE ACCOUNT ══ */
         function confirmDeleteAccount() {
             if (!U) return;
+            if (U.isGuest) {
+                toast('Guest sessions do not have an account to delete.', 'err');
+                return;
+            }
             if (confirm('Are you sure you want to permanently delete your account? This action cannot be undone.')) {
                 // Send delete request to backend
                 fetch('/api/delete-account', {
@@ -5724,7 +5795,10 @@
             const chipName = document.getElementById('chip-name');
             if (chipName) chipName.textContent = U.name;
             const chipHandle = document.getElementById('chip-handle');
-            if (chipHandle) chipHandle.style.display = 'none';
+            if (chipHandle) {
+                chipHandle.textContent = U.isGuest ? 'Guest · this device' : '';
+                chipHandle.style.display = U.isGuest ? 'block' : 'none';
+            }
             const pao = document.getElementById('pop-av-outer');
             if (pao) { pao.innerHTML = U.avatar ? `<img src="${U.avatar}"/>` : `<span class="pop-av-letter">${init}</span>`;
                 pao.onclick = e => { openProfModal();
@@ -5741,12 +5815,15 @@
             const pdn = document.getElementById('pop-disp-name');
             if (pdn) pdn.textContent = U.name;
             const pdu = document.getElementById('pop-disp-username');
-            if (pdu) pdu.style.display = 'none';
+            if (pdu) {
+                pdu.textContent = U.isGuest ? 'Guest session · history stays on this device' : '';
+                pdu.style.display = U.isGuest ? 'block' : 'none';
+            }
             const pdb = document.getElementById('pop-disp-bio');
             if (pdb) { pdb.textContent = U.bio || '';
                 pdb.style.display = U.bio ? '' : 'none'; }
             const pj = document.getElementById('pop-stat-joined');
-            if (pj) pj.textContent = U.joined || '—';
+            if (pj) pj.textContent = U.isGuest ? 'Guest' : (U.joined || '—');
             if (U.email) {
                 fetch('/api/history?user=' + encodeURIComponent(U.email)).then(r => r.json()).then(items => {
                     const el = document.getElementById('pop-stat-dl');
@@ -5759,6 +5836,7 @@
             U = null;
             localStorage.removeItem('idlr_u');
             document.getElementById('main-app').classList.remove('on');
+            document.body.classList.remove('guest-mode');
             document.getElementById('login-screen').style.display = 'flex';
             closePopover();
             closeNotifPopover();
@@ -5791,6 +5869,18 @@
             if (!U) return false;
             const prefs = { mode: _dd.mode, quality: _dd.quality, format: _dd.format, savepath: _savedPath || '' };
             U.prefs = prefs;
+            if (U.isGuest) {
+                try {
+                    localStorage.setItem('idlr_guest_prefs', JSON.stringify(prefs));
+                    const wantSave = (typeof _settingsState === 'undefined') ? true : _settingsState.saveLogins !== false;
+                    if (wantSave) localStorage.setItem('idlr_u', JSON.stringify(U));
+                } catch (error) {
+                    console.warn('Could not save guest preferences:', error);
+                    toast('Guest preferences could not be saved on this device.', 'err');
+                    return false;
+                }
+                return true;
+            }
             // Save session only if the toggle is ON
             const wantSave = (typeof _settingsState === 'undefined') ? true : _settingsState.saveLogins !== false;
             if (wantSave) {
@@ -6187,7 +6277,10 @@
             const bar = document.getElementById('hist-bulk-bar');
             if (bar) bar.className = 'hist-bulk-bar';
             const sbtn = document.getElementById('select-toggle-btn');
-            if (sbtn) sbtn.textContent = '☑ Select';
+            if (sbtn) {
+                sbtn.textContent = '☑ Select';
+                sbtn.setAttribute('aria-pressed', 'false');
+            }
             updateBulkCount();
             renderHistItems();
         }
@@ -6200,7 +6293,10 @@
             const bar = document.getElementById('hist-bulk-bar');
             const btn = document.getElementById('select-toggle-btn');
             if (bar) bar.className = 'hist-bulk-bar' + (_selectModeOn ? ' show' : '');
-            if (btn) btn.textContent = _selectModeOn ? '✕ Cancel' : '☑ Select';
+            if (btn) {
+                btn.textContent = _selectModeOn ? '✕ Cancel' : '☑ Select';
+                btn.setAttribute('aria-pressed', String(_selectModeOn));
+            }
             updateBulkCount();
             renderHistItems();
         }
@@ -6234,6 +6330,7 @@
             _selectModeOn = false;
             document.getElementById('hist-bulk-bar').className = 'hist-bulk-bar';
             document.getElementById('select-toggle-btn').textContent = '☑ Select';
+            document.getElementById('select-toggle-btn').setAttribute('aria-pressed', 'false');
             toast(`Moved ${count} item(s) to Trash 🗑`, 'ok');
             loadHist();
         }
@@ -6320,7 +6417,7 @@
                 const isSpot = String(item.url || '').includes('spotify');
                 const su = encodeURIComponent(item.url || '');
                 const cbHtml = _selectModeOn ?
-                    `<div class="hist-cb${_selected.has(item.url)?' checked':''}" onclick="toggleSelect('${su}',this)">${_selected.has(item.url)?'✓':''}</div>`
+                    `<button type="button" class="hist-cb${_selected.has(item.url)?' checked':''}" role="checkbox" aria-checked="${_selected.has(item.url)}" aria-label="Select download" onclick="toggleSelect('${su}',this)">${_selected.has(item.url)?'✓':''}</button>`
                     : '';
                 const thumbHtml = item.thumb ?
                     `<div class="hist-thumb-wrap"><img src="${esc(item.thumb)}" onerror="this.style.display='none'"/><span class="hist-thumb-badge">${esc((item.format||'?').toUpperCase())}</span></div>` :
@@ -6354,14 +6451,15 @@
 
         function toggleSelect(encodedUrl, cbEl) {
             const url = decodeURIComponent(encodedUrl);
-            if (_selected.has(url)) { _selected.delete(url);
-                cbEl.className = 'hist-cb';
-                cbEl.textContent = ''; } else { _selected.add(url);
-                cbEl.className = 'hist-cb checked';
-                cbEl.textContent = '✓'; }
+            const selected = !_selected.has(url);
+            if (selected) _selected.add(url);
+            else _selected.delete(url);
+            cbEl.classList.toggle('checked', selected);
+            cbEl.setAttribute('aria-checked', String(selected));
+            cbEl.textContent = selected ? '✓' : '';
             updateBulkCount();
             const row = cbEl.closest('.hist-item');
-            if (row) row.className = 'hist-item' + (_selected.has(url) ? ' selected' : '');
+            if (row) row.classList.toggle('selected', selected);
         }
 
         function redl(url) { document.getElementById('url-inp').value = url;
@@ -6660,6 +6758,10 @@
 
         function openProfModal() {
             if (!U) return;
+            if (U.isGuest) {
+                toast('Create an account to edit a profile.', 'err');
+                return;
+            }
             document.getElementById('prof-modal').style.display = 'flex';
             document.getElementById('prof-modal').classList.remove('closing');
             const pm = document.getElementById('prof-modal').querySelector('.modal');
@@ -6696,6 +6798,10 @@
         }
 
         async function saveProfile() {
+            if (!U || U.isGuest) {
+                toast('Create an account to edit a profile.', 'err');
+                return;
+            }
             const name = document.getElementById('edit-name').value.trim();
             const bio = document.getElementById('edit-bio').value.trim();
             const err = document.getElementById('prof-err');

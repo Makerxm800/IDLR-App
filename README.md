@@ -28,6 +28,7 @@ The release page keeps the main downloads easy to find: Windows, Linux, and macO
 - 🎨 **6 themes + Liquid Glass** – Midnight, Light, Ocean, Sunset, Forest, and Rosegold, with reduced-motion support
 - ℹ️ **Premium Info panel (ⓘ)** – live app / yt‑dlp / FFmpeg versions, browser URL, save folder, supported sites
 - 📋 **Bulk history management** – search, select, rename ✏️, re-download, star ★ favorites, or move to 🗑 Trash (restore / empty)
+- 👤 **Continue as guest** – use downloads and history without registering; guest history and preferences stay on this device
 - 🖥️ **Download diagnostics** – the legacy Python development server prints setup and per‑download progress; the installed native app does not require Python
 - 🔒 **100% private** – accounts, history & settings live in `~/.idlr_app/` on your PC only
 
