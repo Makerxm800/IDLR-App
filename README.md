@@ -58,7 +58,7 @@ The installed app is a native Tauri window with a desktop sidebar and workspace 
 
 - **Windows:** build the `IDLR_*_x64-setup.exe` NSIS installer. It registers an uninstaller and upgrades an existing installation when rerun. Find the installer under `src-tauri/target/release/bundle/nsis/`.
 - **Linux:** build `.deb` and `.AppImage` bundles on Linux.
-- **macOS:** build a `.dmg` bundle on macOS. Builds are unsigned; macOS may require you to right-click the app and choose **Open** the first time.
+- **macOS:** build a `.dmg` installer and signed `.app.tar.gz` updater bundle on macOS. Builds are not Apple-notarized; macOS may require you to right-click the app and choose **Open** the first time.
 
 Build on the operating system you want to run on (Tauri and PyInstaller do not cross-compile). On Windows, install Node.js LTS, Python 3.10+, the stable Rust toolchain, and Visual Studio C++ Build Tools with the Windows SDK first. Signed installer builds need the local updater key configured as described below. Then run these commands from the project folder in PowerShell:
 

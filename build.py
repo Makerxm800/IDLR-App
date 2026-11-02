@@ -69,7 +69,12 @@ def main():
     npm = shutil.which("npm.cmd") or shutil.which("npm")
     if npm is None:
         raise RuntimeError("Node.js and npm are required to build the Tauri desktop app.")
-    bundles = "nsis" if IS_WINDOWS else "dmg" if sys.platform == "darwin" else "deb,appimage"
+    if IS_WINDOWS:
+        bundles = "nsis"
+    elif sys.platform == "darwin":
+        bundles = "app,dmg"
+    else:
+        bundles = "deb,appimage"
     if IS_WINDOWS:
         vs_dev_cmd = (
             Path(os.environ.get("ProgramFiles(x86)", r"C:\Program Files (x86)"))
