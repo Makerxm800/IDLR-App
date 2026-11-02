@@ -62,7 +62,7 @@ jobs:
 
       - name: Record updater platform
         shell: bash
-        run: printf '%s-%s\n' '${{ runner.os }}' '${{ runner.arch }}' > "src-tauri/target/release/bundle/target-${{ runner.os }}.txt"
+        run: printf '%s\n' '${{ runner.arch }}' > "src-tauri/target/release/bundle/target-${{ runner.os }}.txt"
 
       - name: Upload native app bundles
         uses: actions/upload-artifact@v4
