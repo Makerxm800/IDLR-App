@@ -21,6 +21,14 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Install Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Install Tauri CLI
+        run: npm ci
+
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
@@ -101,4 +109,4 @@ jobs:
         with:
           tag_name: ${{ github.ref_name }}
           generate_release_notes: true
-          files: release-assets/**/*
+          files: release-assets/**
