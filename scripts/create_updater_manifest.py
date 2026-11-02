@@ -56,10 +56,11 @@ def create_manifest(tag: str, repository: str, artifacts: Path) -> dict[str, obj
                 continue
             if not package.is_file():
                 raise ValueError(f"Signature has no matching updater package: {signature}")
+            release_filename = package.name.replace(" ", ".")
             platforms[target] = {
                 "url": (
                     f"https://github.com/{repository}/releases/download/"
-                    f"{quote(tag, safe='')}/{quote(package.name, safe='')}"
+                    f"{quote(tag, safe='')}/{quote(release_filename, safe='')}"
                 ),
                 "signature": signature.read_text(encoding="utf-8").strip(),
             }

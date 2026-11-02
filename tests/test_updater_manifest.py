@@ -48,7 +48,17 @@ class UpdaterManifestTests(unittest.TestCase):
         )
         self.assertTrue(
             unquote(manifest["platforms"]["windows-x86_64"]["url"]).endswith(
-                "IDLR App_2.0.2_x64-setup.exe"
+                "IDLR.App_2.0.2_x64-setup.exe"
+            )
+        )
+        self.assertTrue(
+            unquote(manifest["platforms"]["linux-x86_64"]["url"]).endswith(
+                "IDLR.App_2.0.2_amd64.AppImage"
+            )
+        )
+        self.assertTrue(
+            unquote(manifest["platforms"]["darwin-aarch64"]["url"]).endswith(
+                "IDLR.app.tar.gz"
             )
         )
         self.assertEqual(
