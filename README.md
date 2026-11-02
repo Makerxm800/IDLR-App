@@ -14,6 +14,8 @@ Everything runs locally on your machine.
 
 [Download the latest Windows setup](https://github.com/Makerxm800/IDLR-App/releases/latest/download/IDLR-App-Setup.exe) · [All releases](https://github.com/Makerxm800/IDLR-App/releases)
 
+The release page keeps the main downloads easy to find: Windows, Linux, and macOS. The Windows installer is 64-bit for Intel/AMD PCs and can run on Windows ARM laptops using Windows x64 emulation. **32-bit Windows is not supported by this build.**
+
 ---
 
 ## ✨ Features
@@ -56,7 +58,7 @@ Everything runs locally on your machine.
 
 The installed app is a native Tauri window with a desktop sidebar and workspace layout. On startup it can also open a browser view at a private, randomly assigned `127.0.0.1` address; that view uses a responsive web layout. Both views use the same local account, history, settings, and download services, so you can keep either or both open. The Settings panel's **Browser URL** button copies the address. The bridge only listens on this PC and checks the request origin. A bundled background worker runs media downloads; the installed app does not require a separate Python installation.
 
-- **Windows:** build the `IDLR_*_x64-setup.exe` NSIS installer. It registers an uninstaller and upgrades an existing installation when rerun. Find the installer under `src-tauri/target/release/bundle/nsis/`.
+- **Windows:** build the `IDLR_*_x64-setup.exe` NSIS installer for 64-bit Intel/AMD Windows. Windows ARM laptops can use this installer through Windows x64 emulation. This release does not provide a 32-bit Windows installer. It registers an uninstaller and upgrades an existing installation when rerun. Find the installer under `src-tauri/target/release/bundle/nsis/`.
 - **Linux:** build `.deb` and `.AppImage` bundles on Linux.
 - **macOS:** build a `.dmg` installer and signed `.app.tar.gz` updater bundle on macOS. Builds are not Apple-notarized; macOS may require you to right-click the app and choose **Open** the first time.
 
@@ -84,7 +86,7 @@ The Settings panel keeps **Update download engine** for yt-dlp/spotdl and has a 
 
 The release workflow targets `Makerxm800/IDLR-App`. Generate the signing key once with `npm run tauri -- signer generate -w "$env:USERPROFILE\.tauri\idlr-updater.key"`; the public key is already configured in `src-tauri/tauri.conf.json`. Keep a secure backup of the private key: losing it prevents future updates. Do not commit it or share it in chat. Before publishing, add the private key contents as the repository Actions secret `TAURI_SIGNING_PRIVATE_KEY`. If you protect the key with a password, also add `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` as an Actions secret. The local build commands above use the key file path; CI uses the secret contents.
 
-Push a matching version tag (for example `v2.0.2`). GitHub Actions builds signed Windows, Linux, and macOS packages, creates the release, and uploads the versioned Windows NSIS setup executable, a stable `IDLR-App-Setup.exe` download, and the updater manifest.
+Push a matching version tag (for example `v2.0.2`). GitHub Actions builds signed Windows, Linux, and macOS packages, publishes the Windows setup, Linux AppImage, macOS DMG and macOS updater archive, and removes stale build files from that release. The updater manifest includes its package signatures, so standalone signature files are not needed in the release downloads.
 
 ### Run from source
 

@@ -137,13 +137,9 @@ jobs:
             cp "$asset" release-publish/
           done < <(find release-assets -type f \( \
             -name '*-setup.exe' -o \
-            -name '*-setup.exe.sig' -o \
             -name '*.AppImage' -o \
-            -name '*.AppImage.sig' -o \
-            -name '*.deb' -o \
             -name '*.dmg' -o \
-            -name '*.app.tar.gz' -o \
-            -name '*.app.tar.gz.sig' \
+            -name '*.app.tar.gz' \
           \) -print0)
           installer="$(find release-publish -type f -name '*-setup.exe' -print -quit)"
           test -n "$installer"
@@ -155,3 +151,17 @@ jobs:
           tag_name: ${{ inputs.release_tag || github.ref_name }}
           generate_release_notes: true
           files: release-publish/*
+
+      - name: Remove stale release assets
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPOSITORY: ${{ github.repository }}
+          RELEASE_TAG: ${{ inputs.release_tag || github.ref_name }}
+        shell: bash
+        run: |
+          release_id="$(gh api "repos/$REPOSITORY/releases/tags/$RELEASE_TAG" --jq .id)"
+          while IFS=$'\t' read -r asset_id asset_name; do
+            if ! test -f "release-publish/$asset_name"; then
+              gh api --method DELETE "repos/$REPOSITORY/releases/assets/$asset_id"
+            fi
+          done < <(gh api --paginate "repos/$REPOSITORY/releases/$release_id/assets" --jq '.[] | [.id, .name] | @tsv')
