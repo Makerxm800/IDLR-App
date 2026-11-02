@@ -161,7 +161,16 @@ jobs:
         run: |
           release_id="$(gh api "repos/$REPOSITORY/releases/tags/$RELEASE_TAG" --jq .id)"
           while IFS=$'\t' read -r asset_id asset_name; do
-            if ! test -f "release-publish/$asset_name"; then
+            keep_asset=false
+            for file in release-publish/*; do
+              expected_name="${file##*/}"
+              expected_name="${expected_name// /.}"
+              if [[ "$expected_name" == "$asset_name" ]]; then
+                keep_asset=true
+                break
+              fi
+            done
+            if [[ "$keep_asset" == false ]]; then
               gh api --method DELETE "repos/$REPOSITORY/releases/assets/$asset_id"
             fi
           done < <(gh api --paginate "repos/$REPOSITORY/releases/$release_id/assets" --jq '.[] | [.id, .name] | @tsv')
