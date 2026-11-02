@@ -1,0 +1,6 @@
+Flask>=3.0
+yt-dlp
+static-ffmpeg
+spotdl
+pywebview
+setuptools<81

@@ -1,0 +1,12 @@
+{
+  "name": "idlr-app",
+  "private": true,
+  "version": "2.0.2",
+  "scripts": {
+    "prepare:frontend": "python scripts/prepare_frontend.py",
+    "tauri": "tauri"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "^2.12.4"
+  }
+}

@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>IDLR — Internet Downloader</title>
+    <title>IDLR App — Internet Downloader</title>
     <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
     <link href="https://fonts.googleapis.com/css2?family=Unbounded:wght@600;700;900&family=DM+Sans:wght@300;400;500;600&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet" />
     <style>
@@ -126,17 +126,20 @@
             border-color: rgba(20, 30, 60, 0.08);
         }
         body[data-theme="light"] .glow { opacity: .4; }
-        /* ── liquid glass (Nebula-style site-wide toggle) ── */
-        body.liquid-glass .card,
+        /* ── liquid glass (Nebula-style site-wide toggle) ──
+           NOTE: .card is deliberately NOT blurred — blur creates a stacking
+           context that traps the open dropdown (.dd-panel) underneath the
+           next card (see screenshot bug). Cards use near-opaque var(--card)
+           so they look identical with or without glass. */
         body.liquid-glass .modal,
         body.liquid-glass .auth-card,
         body.liquid-glass .user-popover,
         body.liquid-glass .notif-popover,
-        body.liquid-glass .topbar {
+        body.liquid-glass .topbar,
+        body.liquid-glass .dd-panel {
             backdrop-filter: blur(32px) saturate(180%);
             -webkit-backdrop-filter: blur(32px) saturate(180%);
         }
-        body:not(.liquid-glass) .card,
         body:not(.liquid-glass) .modal,
         body:not(.liquid-glass) .auth-card,
         body:not(.liquid-glass) .user-popover,
@@ -147,8 +150,13 @@
             -webkit-backdrop-filter: none;
         }
         body:not(.liquid-glass) .modal,
-        body:not(.liquid-glass) .auth-card {
+        body:not(.liquid-glass) .auth-card,
+        body:not(.liquid-glass) .dd-panel {
             background: var(--bg2);
+        }
+        body:not(.liquid-glass) .user-popover,
+        body:not(.liquid-glass) .notif-popover {
+            background: var(--card);
         }
         /* ── reduce motion (accessibility) ── */
         body.reduce-motion *,
@@ -570,17 +578,24 @@
             color: var(--fg3);
             margin-top: 1px
         }
+        /* ── main nav: glass segmented control with sliding pill ──
+           (deliberately different from the history sub-tabs, which use a
+           red-fill active state — here the pill slides behind, text glows) */
         .topnav {
             display: flex;
-            gap: 4px;
+            gap: 2px;
             position: relative;
-            align-items: center
+            align-items: center;
+            padding: 4px;
+            border-radius: 999px;
+            background: rgba(255, 255, 255, 0.04);
+            border: 1px solid rgba(255, 255, 255, 0.08);
         }
         .nav-btn {
             display: flex;
             align-items: center;
             gap: 7px;
-            padding: 7px 16px;
+            padding: 7px 18px;
             border: none;
             border-radius: 999px;
             background: transparent;
@@ -589,28 +604,43 @@
             font-size: 12px;
             font-weight: 500;
             cursor: pointer;
-            transition: all .2s cubic-bezier(.2, .9, .4, 1.1);
+            transition: color .2s, transform .2s cubic-bezier(.2, .9, .4, 1.1);
             position: relative;
-            z-index: 2
+            z-index: 2;
+            white-space: nowrap;
         }
         .nav-btn:hover {
-            background: rgba(255, 255, 255, 0.06);
             color: var(--fg);
             transform: translateY(-1px)
         }
+        .nav-btn:active { transform: scale(.96); }
         .nav-btn.active {
             color: var(--red);
-            font-weight: 600
+            font-weight: 700;
+            text-shadow: 0 0 14px var(--redglow);
         }
         .tab-indicator {
             position: absolute;
-            bottom: -1px;
-            height: 2px;
-            background: linear-gradient(90deg, var(--red), var(--red2));
-            border-radius: 2px;
+            top: 4px;
+            bottom: 4px;
+            left: 0;
+            width: 0;
+            background: rgba(255, 255, 255, 0.09);
+            border: 1px solid rgba(255, 255, 255, 0.12);
+            border-radius: 999px;
+            box-shadow: 0 2px 12px rgba(0, 0, 0, .35), inset 0 1px 0 rgba(255, 255, 255, .08);
             transition: width .35s cubic-bezier(.2, .9, .4, 1.1), left .35s cubic-bezier(.2, .9, .4, 1.1);
             z-index: 1;
             pointer-events: none
+        }
+        body[data-theme="light"] .topnav {
+            background: rgba(20, 30, 60, 0.05);
+            border-color: rgba(20, 30, 60, 0.1);
+        }
+        body[data-theme="light"] .tab-indicator {
+            background: #ffffff;
+            border-color: rgba(20, 30, 60, 0.1);
+            box-shadow: 0 2px 10px rgba(20, 30, 60, .15);
         }
 
         /* ── Icon Buttons & Tooltips ── */
@@ -961,80 +991,136 @@
             flex-shrink: 0
         }
 
-        /* Notification item with delete */
+        /* ── notifications (premium) ── */
+        .notif-popover {
+            width: min(360px, 92vw);
+        }
         .notif-item {
-            padding: 10px 14px;
-            border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+            padding: 10px 12px;
+            margin: 6px 10px;
+            border: 1px solid rgba(255, 255, 255, 0.06);
+            border-radius: 14px;
+            background: rgba(255, 255, 255, 0.03);
             font-size: 12px;
             color: var(--fg2);
-            line-height: 1.4;
+            line-height: 1.45;
             display: flex;
             align-items: flex-start;
-            gap: 8px;
+            gap: 10px;
             position: relative;
+            transition: all .2s cubic-bezier(.2, .9, .4, 1.1);
+            animation: notifIn .35s cubic-bezier(.2, .9, .4, 1.1) both;
         }
-        .notif-item:last-child {
-            border-bottom: none;
+        @keyframes notifIn {
+            from { opacity: 0; transform: translateX(16px) scale(.98); }
+            to { opacity: 1; transform: none; }
+        }
+        .notif-item:hover {
+            background: rgba(255, 255, 255, 0.07);
+            border-color: rgba(255, 255, 255, 0.12);
+            transform: translateX(-2px);
+        }
+        .notif-ico {
+            width: 30px;
+            height: 30px;
+            border-radius: 10px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 15px;
+            flex-shrink: 0;
+        }
+        .notif-ico.success { background: rgba(30, 215, 96, .12); color: var(--grn); }
+        .notif-ico.error { background: var(--redsoft); color: var(--red); }
+        .notif-ico.info { background: rgba(76, 139, 255, .12); color: var(--blue); }
+        .notif-ico.update { background: rgba(245, 158, 11, .12); color: var(--ylw); }
+        .notif-body { flex: 1; min-width: 0; }
+        .notif-msg {
+            overflow: hidden;
+            display: -webkit-box;
+            -webkit-line-clamp: 3;
+            -webkit-box-orient: vertical;
         }
         .notif-item .notif-time {
             font-size: 9px;
             color: var(--fg3);
             display: block;
-            margin-top: 2px;
-        }
-        .notif-item .notif-type {
-            font-weight: 600;
-            color: var(--red);
-            flex-shrink: 0;
+            margin-top: 4px;
+            font-family: 'DM Mono', monospace;
         }
         .notif-item .notif-del {
-            background: none;
-            border: none;
+            background: rgba(255, 255, 255, 0.04);
+            border: 1px solid transparent;
+            border-radius: 8px;
+            width: 24px;
+            height: 24px;
             color: var(--fg3);
             cursor: pointer;
-            font-size: 14px;
-            padding: 0 4px;
-            transition: all .15s;
+            font-size: 11px;
+            transition: all .18s;
             flex-shrink: 0;
-            margin-left: auto;
-            opacity: 0.4;
+            opacity: 0.5;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            line-height: 1;
         }
+        .notif-item:hover .notif-del { opacity: 1; }
         .notif-item .notif-del:hover {
             color: var(--red);
-            opacity: 1;
-            transform: scale(1.2);
+            background: var(--redsoft);
+            border-color: rgba(255, 32, 32, .25);
+            transform: scale(1.1);
         }
         .notif-empty {
-            padding: 20px 14px;
+            padding: 28px 14px;
             text-align: center;
             color: var(--fg3);
             font-size: 12px;
         }
+        .notif-empty-ico {
+            font-size: 32px;
+            display: block;
+            margin-bottom: 10px;
+            opacity: .4;
+        }
+        .notif-count-pill {
+            font-size: 10px;
+            font-weight: 700;
+            font-family: 'DM Mono', monospace;
+            background: var(--redsoft);
+            color: var(--red);
+            border-radius: 999px;
+            padding: 2px 9px;
+        }
         .notif-popover .pop-body {
-            padding: 10px 0 6px;
+            padding: 4px 0 6px;
         }
         .notif-popover .pop-body .pop-action {
             padding: 8px 14px;
-            border-top: 1px solid rgba(255, 255, 255, 0.06);
-        }
-        .notif-popover .pop-body .pop-action:first-child {
-            border-top: none;
+            margin: 6px 10px 2px;
+            border: 1px solid rgba(255, 255, 255, 0.06);
+            border-radius: 12px;
         }
         .notif-popover .pop-body .notif-list {
-            max-height: 280px;
+            max-height: min(320px, 50dvh);
             overflow-y: auto;
+            padding: 4px 0;
         }
         .notif-popover .pop-header {
             display: flex;
             justify-content: space-between;
             align-items: center;
-            padding: 10px 14px 4px;
+            padding: 12px 14px 8px;
             border-bottom: 1px solid rgba(255, 255, 255, 0.06);
         }
         .notif-popover .pop-header h4 {
             font-size: 13px;
             font-weight: 600;
             color: var(--fg);
+            display: flex;
+            align-items: center;
+            gap: 8px;
         }
         .notif-popover .pop-header .notif-close {
             background: none;
@@ -1049,6 +1135,22 @@
         .notif-popover .pop-header .notif-close:hover {
             color: var(--fg);
             transform: rotate(90deg);
+        }
+        /* light theme: popover + items go bright */
+        body[data-theme="light"] .notif-item {
+            background: rgba(20, 30, 60, 0.03);
+            border-color: rgba(20, 30, 60, 0.08);
+        }
+        body[data-theme="light"] .notif-item:hover {
+            background: rgba(20, 30, 60, 0.06);
+            border-color: rgba(20, 30, 60, 0.14);
+        }
+        body[data-theme="light"] .notif-item .notif-del {
+            background: rgba(20, 30, 60, 0.05);
+        }
+        body[data-theme="light"] .notif-popover .pop-header,
+        body[data-theme="light"] .notif-popover .pop-body .pop-action {
+            border-color: rgba(20, 30, 60, 0.08);
         }
 
         /* ── pages ── */
@@ -1122,6 +1224,10 @@
         .card:hover {
             border-color: rgba(255, 255, 255, 0.12);
             transform: translateY(-2px);
+        }
+        .card.dropdown-open {
+            position: relative;
+            z-index: 60;
         }
         .clabel {
             font-size: 9px;
@@ -1754,6 +1860,71 @@
             font-family: 'Unbounded', sans-serif;
             font-size: 15px
         }
+        .hist-heading-copy {
+            display: grid;
+            gap: 5px;
+        }
+        .hist-heading-copy p {
+            color: var(--fg3);
+            font-size: 11px;
+        }
+        /* ── history sub-tabs (Files / Favorites / Recent / Trash) ── */
+        .hist-tabs {
+            display: grid;
+            grid-template-columns: repeat(4, minmax(0, 1fr));
+            align-items: center;
+            gap: 4px;
+            padding: 4px;
+            margin-bottom: 12px;
+            border-radius: 16px;
+            background: linear-gradient(135deg, rgba(255,255,255,.055), rgba(255,255,255,.025));
+            border: 1px solid rgba(255, 255, 255, 0.08);
+            width: 100%;
+        }
+        .hist-tab {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 6px;
+            padding: 10px 12px;
+            border: none;
+            border-radius: 12px;
+            background: transparent;
+            color: var(--fg3);
+            font-family: 'DM Sans', sans-serif;
+            font-size: 12px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all .22s cubic-bezier(.2, .9, .4, 1.1);
+            white-space: nowrap;
+        }
+        .hist-tab:hover {
+            background: rgba(255, 255, 255, 0.07);
+            color: var(--fg);
+            transform: translateY(-1px);
+        }
+        .hist-tab:active { transform: scale(.96); }
+        .hist-tab.active {
+            background: linear-gradient(135deg, var(--red), var(--red2));
+            color: #fff;
+            box-shadow: 0 4px 18px var(--redglow);
+        }
+        .hist-tab-cnt {
+            font-family: 'DM Mono', monospace;
+            font-size: 10px;
+            opacity: .9;
+            min-width: 19px;
+            text-align: center;
+            padding: 2px 5px;
+            border-radius: 999px;
+            background: rgba(255,255,255,.07);
+        }
+        .hist-tab-cnt:empty { display: none; }
+        .hbtn.star.lit {
+            border-color: rgba(255, 200, 40, .45);
+            color: #ffc828;
+            background: rgba(255, 200, 40, .08);
+        }
         .hist-actions-bar {
             display: flex;
             gap: 8px;
@@ -1876,8 +2047,10 @@
             }
         }
         .hist-item:hover {
-            background: rgba(30, 30, 30, 0.7);
-            border-color: rgba(255, 255, 255, 0.12);
+            background: linear-gradient(110deg, rgba(36,36,36,.82), rgba(18,18,18,.86));
+            border-color: rgba(255, 255, 255, 0.14);
+            box-shadow: 0 10px 28px rgba(0,0,0,.18);
+            transform: translateY(-1px);
             transform: translateX(4px)
         }
         .hist-item.selected {
@@ -2252,6 +2425,38 @@
             box-shadow: 0 2px 16px var(--redglow);
         }
 
+        /* ── hover sheen (mouse VFX on settings rows + theme cards) ── */
+        .setting-row,
+        .theme-option {
+            position: relative;
+            overflow: hidden;
+        }
+        .setting-row::after,
+        .theme-option::after {
+            content: "";
+            position: absolute;
+            top: 0;
+            left: -70%;
+            width: 45%;
+            height: 100%;
+            background: linear-gradient(100deg, transparent, var(--redglow), transparent);
+            transform: skewX(-15deg);
+            transition: left .55s ease;
+            pointer-events: none;
+        }
+        .setting-row:hover::after,
+        .theme-option:hover::after {
+            left: 140%;
+        }
+        .setting-row:hover .setting-row-ico,
+        .theme-option:hover .theme-swatch {
+            transform: scale(1.1) rotate(-5deg);
+        }
+        .setting-row-ico,
+        .theme-swatch {
+            transition: transform .25s cubic-bezier(.34, 1.56, .64, 1);
+        }
+
         /* ── theme picker (Nebula-style swatches) ── */
         .theme-grid {
             display: grid;
@@ -2339,7 +2544,7 @@
         .hero-title { font-size: clamp(24px, 6vw, 32px); }
         @media (max-width: 560px) {
             .page { padding: 16px 14px; }
-            .topbar { padding: 0 12px; gap: 8px; overflow-x: auto; }
+            .topbar { padding: 0 12px; gap: 8px; }
             .topnav { gap: 2px; }
             .nav-btn { padding: 7px 12px; font-size: 11px; }
             .tbar-name-full { display: none; }
@@ -2348,6 +2553,14 @@
             .opts-grid { grid-template-columns: 1fr; }
             .dl-btn { width: 100%; justify-content: center; }
             .hist-actions-bar { width: 100%; }
+            .hist-header { align-items: flex-start; }
+            .hist-actions-bar .hist-search-wrap { flex-basis: 100%; }
+            .hist-tabs { grid-template-columns: repeat(2,minmax(0,1fr)); border-radius: 14px; }
+            .hist-tab { padding: 9px 7px; font-size: 11px; }
+            .hist-item { flex-wrap: wrap; gap: 9px; padding: 10px; border-radius: 13px; }
+            .hist-item .hist-info { flex-basis: calc(100% - 82px); }
+            .hist-item .hist-btns { width: 100%; justify-content: flex-end; }
+            .profile-modal { width: 100%; max-width: 100%; max-height: 92dvh; border-radius: 22px 22px 0 0; }
         }
 
         /* ── account items ── */
@@ -2595,20 +2808,50 @@
             margin-top: 10px
         }
         .profile-modal {
-            max-width: 500px
+            width: min(560px, calc(100vw - 28px));
+            max-width: 560px;
+            max-height: min(90dvh, 900px);
+            overflow-y: auto;
+            scrollbar-width: thin;
         }
+        .profile-modal > .modal-close { z-index: 2; }
         .prof-banner {
-            height: 80px;
+            position: relative;
+            height: 108px;
             background: linear-gradient(135deg, #ff2020, #880000);
             border-radius: 20px 20px 0 0;
-            margin: -28px -28px 0
+            margin: -28px -28px 0;
+            overflow: hidden;
         }
+        .prof-banner > img {
+            position: absolute;
+            inset: 0;
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+        }
+        .prof-cover-edit {
+            position: absolute;
+            right: 14px;
+            bottom: 12px;
+            z-index: 1;
+            border: 1px solid rgba(255,255,255,.22);
+            border-radius: 999px;
+            background: rgba(10,10,10,.65);
+            color: #fff;
+            padding: 7px 12px;
+            font: 600 11px 'DM Sans',sans-serif;
+            cursor: pointer;
+            backdrop-filter: blur(12px);
+        }
+        .prof-cover-edit:hover { background: rgba(10,10,10,.85); }
         .prof-av-wrap {
             position: relative;
             display: inline-block;
             margin-top: -36px;
             margin-left: 20px;
-            cursor: pointer
+            cursor: pointer;
+            z-index: 2;
         }
         .prof-av {
             width: 72px;
@@ -2637,6 +2880,108 @@
         #prof-av-input {
             display: none
         }
+        .prof-photo-action {
+            position: absolute;
+            right: -3px;
+            bottom: -2px;
+            width: 25px;
+            height: 25px;
+            border: 2px solid var(--card);
+            border-radius: 50%;
+            display: grid;
+            place-items: center;
+            background: var(--red);
+            color: #fff;
+            font-size: 11px;
+        }
+        .prof-image-studio {
+            margin: 0 0 18px;
+            padding: 15px;
+            border: 1px solid var(--bdr2);
+            border-radius: 16px;
+            background: linear-gradient(135deg,rgba(255,255,255,.055),rgba(255,255,255,.02));
+        }
+        .prof-image-studio[hidden] { display: none; }
+        .prof-studio-head {
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-start;
+            gap: 12px;
+            margin-bottom: 12px;
+        }
+        .prof-studio-title { font-size: 13px; font-weight: 700; }
+        .prof-studio-sub { margin-top: 4px; color: var(--fg3); font-size: 10px; line-height: 1.5; }
+        .prof-studio-targets { display: flex; gap: 5px; flex-shrink: 0; }
+        .prof-target-btn {
+            border: 1px solid var(--bdr2);
+            border-radius: 999px;
+            padding: 6px 9px;
+            background: var(--s3);
+            color: var(--fg3);
+            font: 600 10px 'DM Sans',sans-serif;
+            cursor: pointer;
+        }
+        .prof-target-btn.active { color: var(--fg); border-color: var(--red); background: var(--redsoft); }
+        .prof-image-upload {
+            width: 100%;
+            min-height: 54px;
+            border: 1px dashed rgba(255,255,255,.2);
+            border-radius: 12px;
+            background: rgba(255,255,255,.025);
+            color: var(--fg2);
+            font: 600 11px 'DM Sans',sans-serif;
+            cursor: pointer;
+        }
+        .prof-image-upload:hover { border-color: var(--red); background: var(--redsoft); }
+        .prof-image-gallery {
+            display: grid;
+            grid-template-columns: repeat(auto-fill,minmax(66px,1fr));
+            gap: 8px;
+            margin-top: 12px;
+            max-height: 190px;
+            overflow-y: auto;
+        }
+        .prof-gallery-item {
+            position: relative;
+            aspect-ratio: 1;
+            width: 100%;
+            min-width: 0;
+            border: 1px solid var(--bdr2);
+            border-radius: 11px;
+            background: var(--bg2);
+            padding: 3px;
+            cursor: pointer;
+            overflow: hidden;
+        }
+        .prof-gallery-item img { width: 100%; height: 100%; display: block; object-fit: cover; border-radius: 8px; }
+        .prof-gallery-item.selected { border: 2px solid var(--red); box-shadow: 0 0 0 3px var(--redsoft); }
+        .prof-gallery-card { position: relative; min-width: 0; }
+        .prof-gallery-remove {
+            position: absolute;
+            z-index: 1;
+            top: 5px;
+            right: 5px;
+            width: 20px;
+            height: 20px;
+            border: 1px solid rgba(255,255,255,.35);
+            border-radius: 50%;
+            background: rgba(0,0,0,.72);
+            color: #fff;
+            font-size: 12px;
+            line-height: 1;
+            cursor: pointer;
+        }
+        .prof-gallery-remove:hover { background: var(--red); }
+        .prof-gallery-date {
+            position: absolute;
+            inset: auto 3px 3px;
+            padding: 3px 2px;
+            border-radius: 0 0 7px 7px;
+            background: rgba(0,0,0,.68);
+            color: #fff;
+            font: 8px 'DM Mono',monospace;
+        }
+        .prof-gallery-empty { grid-column: 1/-1; color: var(--fg3); font-size: 10px; padding: 10px 2px; }
         .prof-stat-row {
             display: flex;
             gap: 24px;
@@ -2957,10 +3302,471 @@
             font-family: 'DM Mono', monospace;
         }
         .info-sysrow b { color: var(--fg); font-weight: 600; }
+
+        /* Native desktop workspace: browser mode intentionally keeps its own top navigation. */
+        body.desktop-shell #main-app {
+            display: none;
+            grid-template-columns: 228px minmax(0, 1fr);
+            grid-template-rows: minmax(0, 1fr) auto;
+            height: 100dvh;
+            min-height: 0;
+            background:
+                radial-gradient(ellipse at 82% 0%, rgba(255, 32, 32, .055), transparent 38%),
+                var(--bg);
+        }
+        body.desktop-shell #main-app.on { display: grid; }
+        body.desktop-shell .topbar {
+            grid-column: 1;
+            grid-row: 1 / 3;
+            height: auto;
+            min-height: 0;
+            padding: 24px 16px 18px;
+            flex-direction: column;
+            align-items: stretch;
+            gap: 28px;
+            background: rgba(8, 8, 9, .88);
+            border-right: 1px solid var(--bdr);
+            border-bottom: 0;
+        }
+        body.desktop-shell .tbar-logo {
+            gap: 12px;
+            padding: 2px 7px;
+        }
+        body.desktop-shell .tbar-logo svg { width: 38px; height: 38px; }
+        body.desktop-shell .tbar-name-short { font-size: 16px; }
+        body.desktop-shell .tbar-name-full {
+            margin-top: 3px;
+            font-size: 10px;
+            letter-spacing: .02em;
+        }
+        body.desktop-shell .topnav {
+            width: 100%;
+            flex-direction: column;
+            align-items: stretch;
+            gap: 5px;
+            padding: 6px;
+            border-radius: 16px;
+            background: transparent;
+            border-color: transparent;
+        }
+        body.desktop-shell .nav-btn {
+            justify-content: flex-start;
+            min-height: 44px;
+            padding: 0 14px;
+            border-radius: 12px;
+            font-size: 13px;
+        }
+        body.desktop-shell .nav-btn:hover { transform: none; }
+        body.desktop-shell .nav-btn.active {
+            color: var(--fg);
+            background: var(--redsoft);
+        }
+        body.desktop-shell .tab-indicator { display: none; }
+        body.desktop-shell .topbar > div:last-child {
+            width: 100%;
+            margin: auto 0 0 !important;
+            padding-top: 14px;
+            flex-direction: column;
+            align-items: stretch !important;
+            gap: 7px !important;
+            border-top: 1px solid var(--bdr);
+        }
+        body.desktop-shell .icon-btn-wrapper,
+        body.desktop-shell .notif-wrapper,
+        body.desktop-shell .user-chip { width: 100%; }
+        body.desktop-shell .settings-trigger {
+            width: 100%;
+            height: 42px;
+            justify-content: flex-start;
+            gap: 12px;
+            padding: 0 12px;
+            border-radius: 12px;
+            background: var(--s3);
+            border: 1px solid var(--bdr);
+        }
+        body.desktop-shell #notif-trigger::after,
+        body.desktop-shell #info-trigger::after,
+        body.desktop-shell #settings-trigger::after {
+            color: var(--fg2);
+            font-size: 12px;
+            font-weight: 600;
+        }
+        body.desktop-shell #notif-trigger::after { content: "Notifications"; }
+        body.desktop-shell #info-trigger::after { content: "Info & help"; }
+        body.desktop-shell #settings-trigger::after { content: "Settings"; }
+        body.desktop-shell .settings-trigger:hover {
+            background: var(--s4);
+            transform: none;
+        }
+        body.desktop-shell .settings-trigger .tooltip,
+        body.desktop-shell .chip-btn .tooltip { display: none; }
+        body.desktop-shell .chip-btn {
+            min-height: 52px;
+            width: 100%;
+            padding: 7px;
+            border-radius: 14px;
+            background: var(--s3);
+            border: 1px solid var(--bdr);
+        }
+        body.desktop-shell .chip-info { max-width: 132px; }
+        body.desktop-shell .pages {
+            grid-column: 2;
+            grid-row: 1;
+            min-height: 0;
+        }
+        body.desktop-shell .page { padding: 32px clamp(28px, 5vw, 76px); }
+        body.desktop-shell .dl-hero {
+            max-width: 1040px;
+            margin: 0 auto;
+            padding: 24px 0 28px;
+            text-align: left;
+        }
+        body.desktop-shell .hero-title { font-size: clamp(36px, 4vw, 54px); }
+        body.desktop-shell .hero-title .hw,
+        body.web-shell .hero-title .hw { margin-right: .16em; }
+        body.desktop-shell .hero-chips { justify-content: flex-start; }
+        body.desktop-shell #page-dl > .card,
+        body.desktop-shell #page-dl > .prog-wrap,
+        body.desktop-shell #page-dl > .now-card,
+        body.desktop-shell #page-dl > .console,
+        body.desktop-shell #page-dl > .path-bar,
+        body.desktop-shell #page-hist > * {
+            max-width: 1040px;
+            margin-right: auto;
+            margin-left: auto;
+        }
+        body.desktop-shell .card {
+            border-radius: 18px;
+            box-shadow: 0 12px 32px rgba(0, 0, 0, .16);
+        }
+        body.desktop-shell .footer-bar {
+            grid-column: 2;
+            grid-row: 2;
+            min-height: 38px;
+            padding: 8px 28px;
+            background: rgba(8, 8, 9, .56);
+            border-top: 1px solid var(--bdr);
+        }
+        body.desktop-shell[data-theme="light"] .topbar,
+        body.desktop-shell[data-theme="light"] .footer-bar {
+            background: rgba(255, 255, 255, .9);
+        }
+        body.desktop-shell .modal-bg { padding: 24px; }
+        body.desktop-shell .settings-modal-inner { width: min(760px, 92vw); }
+        body.desktop-shell :is(button, input, [tabindex="0"]):focus-visible {
+            outline: 2px solid var(--red);
+            outline-offset: 3px;
+        }
+
+        /* Web workspace: spacious horizontal navigation and fluid single-column content. */
+        body.web-shell #main-app { min-height: 100dvh; }
+        body.web-shell .topbar {
+            position: sticky;
+            top: 0;
+            background: rgba(10, 10, 10, .82);
+            border-bottom-color: var(--bdr2);
+        }
+        body.web-shell .page { padding: clamp(18px, 3vw, 34px); }
+        body.web-shell #page-dl > .card,
+        body.web-shell #page-dl > .prog-wrap,
+        body.web-shell #page-dl > .now-card,
+        body.web-shell #page-dl > .console,
+        body.web-shell #page-dl > .path-bar,
+        body.web-shell #page-hist > * {
+            width: min(100%, 920px);
+            margin-right: auto;
+            margin-left: auto;
+        }
+        body.web-shell .dl-hero { padding-top: clamp(22px, 5vh, 48px); }
+        body.web-shell .hero-title { font-size: clamp(30px, 5vw, 48px); }
+        body.web-shell[data-theme="light"] .topbar { background: rgba(255,255,255,.88); }
+        @media (max-width: 860px) {
+            body.desktop-shell #main-app { grid-template-columns: 188px minmax(0, 1fr); }
+            body.desktop-shell .topbar { padding-right: 12px; padding-left: 12px; }
+            body.desktop-shell .tbar-logo { gap: 9px; }
+            body.desktop-shell .tbar-logo svg { width: 34px; height: 34px; }
+            body.desktop-shell .tbar-name-short { font-size: 14px; }
+            body.desktop-shell .chip-info { max-width: 104px; }
+            body.desktop-shell .page { padding: 22px; }
+        }
+        @media (max-width: 560px) {
+            body.web-shell .topbar { position: relative; }
+            body.web-shell .footer-bar { padding: 8px 14px; }
+        }
+
+        /* Consistent theme tokens and interaction feedback across both shells. */
+        html { color-scheme: dark; }
+        html:has(body[data-theme="light"]) { color-scheme: light; }
+        body::before { background: radial-gradient(circle at 20% 50%, var(--redglow) 0%, transparent 58%); }
+        .glow { background: radial-gradient(circle, var(--redglow) 0%, transparent 70%); }
+        body.desktop-shell #main-app {
+            background:
+                radial-gradient(ellipse at 82% 0%, var(--redsoft), transparent 38%),
+                var(--bg);
+        }
+        :is(button, a[onclick], [role="button"], [role="tab"], [role="switch"], .theme-option, .hist-item) {
+            -webkit-tap-highlight-color: transparent;
+        }
+        button:not(:disabled),
+        a[onclick],
+        [role="button"],
+        [role="tab"] {
+            transition:
+                color .18s ease,
+                background-color .18s ease,
+                border-color .18s ease,
+                box-shadow .22s ease,
+                transform .22s cubic-bezier(.2, .8, .2, 1);
+        }
+        button:not(:disabled):hover,
+        a[onclick]:hover,
+        [role="button"]:hover,
+        [role="tab"]:hover {
+            transform: translateY(-1px);
+        }
+        button:not(:disabled):active,
+        a[onclick]:active,
+        [role="button"]:active,
+        [role="tab"]:active {
+            transform: scale(.97);
+        }
+        button:disabled { cursor: not-allowed; }
+        .settings-trigger:focus-visible,
+        .nav-btn:focus-visible,
+        .hist-tab:focus-visible,
+        .pill:focus-visible,
+        .notif-popover button:focus-visible {
+            outline: 2px solid var(--red);
+            outline-offset: 3px;
+        }
+        .hist-tabs {
+            gap: 5px;
+            padding: 5px;
+            background: var(--card);
+            border-color: var(--bdr2);
+            box-shadow: 0 8px 24px rgba(0, 0, 0, .12);
+        }
+        .hist-tab {
+            min-height: 42px;
+            gap: 8px;
+            padding: 9px 12px;
+            border: 1px solid transparent;
+            border-radius: 12px;
+            color: var(--fg3);
+            font-weight: 600;
+        }
+        .hist-tab:hover {
+            color: var(--fg);
+            background: var(--s3);
+            transform: translateY(-1px);
+        }
+        .hist-tab.active {
+            color: var(--fg);
+            background: var(--redsoft);
+            border-color: var(--redglow);
+            box-shadow: inset 0 0 0 1px var(--redglow);
+        }
+        .hist-tab-cnt {
+            min-width: 22px;
+            padding: 3px 7px;
+            background: var(--s4);
+            color: var(--fg2);
+            line-height: 1.2;
+        }
+        .hist-tab.active .hist-tab-cnt {
+            background: var(--red);
+            color: #fff;
+        }
+        .notif-popover {
+            width: min(390px, calc(100vw - 24px));
+            border-color: var(--bdr2);
+            border-radius: 18px;
+            background: var(--card);
+            box-shadow: 0 24px 70px rgba(0, 0, 0, .34);
+        }
+        .notif-popover .pop-header {
+            min-height: 58px;
+            padding: 12px 14px;
+            border-color: var(--bdr);
+        }
+        .notif-popover .pop-header h4 { font-size: 14px; }
+        .notif-head-actions { display: flex; align-items: center; gap: 8px; }
+        .notif-mark-read {
+            padding: 6px 9px;
+            border: 1px solid var(--bdr);
+            border-radius: 9px;
+            background: var(--s3);
+            color: var(--fg2);
+            font: 600 10px 'DM Sans', sans-serif;
+            cursor: pointer;
+        }
+        .notif-mark-read:not(:disabled):hover {
+            color: var(--fg);
+            background: var(--s4);
+            border-color: var(--bdr2);
+        }
+        .notif-mark-read:disabled { opacity: .45; }
+        .notif-popover .pop-body .notif-list {
+            max-height: min(380px, 56dvh);
+            padding: 8px 4px;
+        }
+        .notif-item {
+            align-items: center;
+            gap: 11px;
+            margin: 5px 8px;
+            padding: 11px;
+            border-color: var(--bdr);
+            background: var(--s3);
+        }
+        .notif-item.unread {
+            border-color: var(--redglow);
+            background: var(--redsoft);
+        }
+        .notif-item.unread::after {
+            content: "";
+            width: 7px;
+            height: 7px;
+            flex: 0 0 7px;
+            order: -1;
+            margin-right: -6px;
+            border-radius: 50%;
+            background: var(--red);
+            box-shadow: 0 0 10px var(--redglow);
+        }
+        .notif-item:hover { background: var(--s4); border-color: var(--bdr2); }
+        .notif-ico { width: 34px; height: 34px; border-radius: 11px; }
+        .notif-msg { color: var(--fg); font-weight: 550; }
+        .notif-item .notif-time { font-size: 10px; }
+        .notif-item .notif-del { opacity: .75; }
+        .notif-clear-all {
+            width: calc(100% - 20px);
+            min-height: 36px;
+            margin: 2px 10px 6px;
+            border: 1px solid var(--bdr);
+            border-radius: 10px;
+            background: transparent;
+            color: var(--fg3);
+            font: 600 11px 'DM Sans', sans-serif;
+            cursor: pointer;
+        }
+        .notif-clear-all:hover {
+            color: var(--red);
+            background: var(--redsoft);
+            border-color: var(--redglow);
+        }
+        .notif-clear-all:disabled { opacity: .45; cursor: not-allowed; }
+        .notif-empty {
+            display: grid;
+            justify-items: center;
+            gap: 3px;
+            padding: 30px 14px;
+        }
+        body[data-theme="light"] .notif-popover,
+        body[data-theme="light"] .user-popover,
+        body[data-theme="light"] .modal,
+        body[data-theme="light"] .dd-panel {
+            background: rgba(250, 251, 254, .98);
+            border-color: rgba(33, 47, 77, .14);
+            box-shadow: 0 20px 60px rgba(35, 48, 76, .2);
+        }
+        body[data-theme="light"] .notif-item {
+            background: rgba(31, 48, 78, .035);
+            border-color: rgba(31, 48, 78, .09);
+        }
+        body[data-theme="light"] .notif-item.unread {
+            background: rgba(224, 38, 38, .06);
+            border-color: rgba(224, 38, 38, .2);
+        }
+        body[data-theme="light"] .notif-mark-read,
+        body[data-theme="light"] .notif-clear-all { background: rgba(31, 48, 78, .04); }
+        body[data-theme="light"] .setting-row,
+        body[data-theme="light"] .hist-tabs,
+        body[data-theme="light"] .hist-bulk-bar,
+        body[data-theme="light"] .hist-item,
+        body[data-theme="light"] .theme-option,
+        body[data-theme="light"] .notif-item {
+            box-shadow: 0 2px 9px rgba(38, 52, 79, .045);
+        }
+        body[data-theme="light"] .hist-tab.active {
+            color: #a51d24;
+            background: rgba(224, 38, 38, .09);
+            border-color: rgba(224, 38, 38, .2);
+        }
+        body[data-theme="light"] .hist-tab.active .hist-tab-cnt { color: #fff; }
+        body[data-theme="light"] .theme-option {
+            background: rgba(255,255,255,.72);
+            border-color: rgba(31, 48, 78, .1);
+        }
+        body[data-theme="light"] .theme-option.active-theme {
+            background: rgba(224, 38, 38, .065);
+            border-color: var(--red);
+        }
+        body[data-theme="light"] .theme-swatch {
+            border-color: rgba(31, 48, 78, .18);
+            box-shadow: inset 0 1px 3px rgba(255,255,255,.7), 0 2px 5px rgba(31,48,78,.15);
+        }
+        body[data-theme="light"] .toast {
+            color: var(--fg);
+            background: rgba(250, 251, 254, .97);
+            border-color: rgba(33, 47, 77, .14);
+            box-shadow: 0 10px 32px rgba(35, 48, 76, .16);
+        }
+        .app-update-disabled { opacity: .58; cursor: not-allowed; }
+        .app-update-disabled:hover { transform: none; box-shadow: none; }
+        body[data-theme="ocean"] .card,
+        body[data-theme="sunset"] .card,
+        body[data-theme="forest"] .card,
+        body[data-theme="rosegold"] .card {
+            border-color: var(--bdr2);
+        }
+        @media (max-width: 560px) {
+            .notif-popover {
+                position: fixed;
+                top: 62px;
+                right: 12px;
+                width: min(390px, calc(100vw - 24px));
+            }
+            .hist-tabs { gap: 4px; padding: 4px; }
+            .hist-tab { min-height: 40px; padding: 8px 5px; font-size: 10px; }
+            .hist-tab-label { overflow: hidden; text-overflow: ellipsis; }
+            .hist-tab-cnt { min-width: 18px; padding: 2px 4px; }
+        }
+        @media (prefers-reduced-motion: reduce) {
+            *, *::before, *::after {
+                scroll-behavior: auto !important;
+                animation-duration: .01ms !important;
+                animation-iteration-count: 1 !important;
+                transition-duration: .01ms !important;
+            }
+        }
     </style>
+    <script>
+        (() => {
+            const invoke = window.__TAURI__?.core?.invoke;
+            if (!invoke) return;
+            const browserFetch = window.fetch.bind(window);
+            window.fetch = async (input, init = {}) => {
+                const requestUrl = typeof input === 'string' ? input : input.url;
+                const url = new URL(requestUrl, window.location.href);
+                if (!url.pathname.startsWith('/api/')) return browserFetch(input, init);
+                const method = (init.method || (typeof input === 'string' ? 'GET' : input.method)).toUpperCase();
+                const rawBody = init.body ?? (typeof input === 'string' ? null : await input.clone().text());
+                const body = typeof rawBody === 'string' && rawBody ? JSON.parse(rawBody) : rawBody;
+                const result = await invoke('api_request', {
+                    method,
+                    url: url.pathname + url.search,
+                    body
+                });
+                return new Response(JSON.stringify(result.body), {
+                    status: result.status,
+                    headers: { 'Content-Type': 'application/json' }
+                });
+            };
+        })();
+    </script>
 </head>
     <body>
-    <script>try{var _t=localStorage.getItem('idlr_theme')||'midnight';document.body.setAttribute('data-theme',_t);var _s=localStorage.getItem('idlr_settings');if(_s){var _p=JSON.parse(_s);if(_p.liquidGlass===false)document.body.classList.remove('liquid-glass');else document.body.classList.add('liquid-glass');if(_p.reduceMotion)document.body.classList.add('reduce-motion');if(!_p.animHero)document.body.classList.add('no-anim');if(!_p.consoleLog)document.body.classList.add('hide-console');}else{document.body.classList.add('liquid-glass');}}catch(e){}</script>
+    <script>document.body.classList.add(window.__TAURI__?.core?.invoke ? 'desktop-shell' : 'web-shell');try{var _t=localStorage.getItem('idlr_theme')||'midnight';document.body.setAttribute('data-theme',_t);var _s=localStorage.getItem('idlr_settings');if(_s){var _p=JSON.parse(_s);if(_p.liquidGlass===false)document.body.classList.remove('liquid-glass');else document.body.classList.add('liquid-glass');if(_p.reduceMotion)document.body.classList.add('reduce-motion');if(!_p.animHero)document.body.classList.add('no-anim');if(!_p.consoleLog)document.body.classList.add('hide-console');}else{document.body.classList.add('liquid-glass');}}catch(e){}</script>
     <!-- Loading overlay (premium) -->
     <div id="loading-overlay">
         <div class="loader-logo">IDLR</div>
@@ -2976,10 +3782,10 @@
             <div class="login-wrap">
                 <div class="login-logo">
                     <div class="logo-row">
-                        <svg width="44" height="44" viewBox="0 0 64 64"><defs><linearGradient id="lg" x1="0%" y1="0%" x2="100%" y2="100%"><stop offset="0%" stop-color="#ff2828"/><stop offset="100%" stop-color="#b80000"/></linearGradient></defs><rect width="64" height="64" rx="16" fill="url(#lg)"/><rect width="64" height="32" rx="16" fill="white" fill-opacity=".12"/><polygon points="24,16 24,48 48,32" fill="white" filter="drop-shadow(0 2px 4px rgba(0,0,0,.3))"/></svg>
+                        <svg width="44" height="44" viewBox="0 0 64 64" aria-hidden="true"><defs><linearGradient id="idlr-mark" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#ff5b56"/><stop offset="1" stop-color="#d9133b"/></linearGradient></defs><rect width="64" height="64" rx="19" fill="url(#idlr-mark)"/><path d="M32 14v23m0 0 9-9m-9 9-9-9M19 45h26" fill="none" stroke="#fff" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"/></svg>
                         <span class="logo-name">IDLR</span>
                     </div>
-                    <div class="logo-sub">Internet Downloader · YouTube · Spotify · 1000+ Sites</div>
+                    <div class="logo-sub">Your private media workspace</div>
                 </div>
                 <div class="auth-card">
                     <div class="auth-heading" id="auth-head">Welcome back</div>
@@ -3020,7 +3826,7 @@
                     <div class="auth-switch"><span id="sw-txt">No account?</span><a id="sw-link" onclick="toggleAuthMode()"> Create one</a></div>
                 </div>
                 <div class="login-footer">
-                    <p class="login-footer-copy">© 2026 IDLR — Internet Downloader. All rights reserved.</p>
+                    <p class="login-footer-copy">© 2026 IDLR App — Internet Downloader. All rights reserved.</p>
                     <div class="login-footer-links">
                         <a onclick="showModal('terms')">Terms</a>
                         <a onclick="showModal('privacy')">Privacy</a>
@@ -3034,7 +3840,7 @@
         <div class="modal-bg" id="terms-modal" style="display:none" onclick="if(event.target===this)closeModal('terms')">
             <div class="modal"><button class="modal-close" onclick="closeModal('terms')">✕</button>
                 <h3>📄 Terms of Service</h3>
-                <p style="font-size:11px;color:var(--fg3);margin-bottom:18px">IDLR — Internet Downloader · Effective 2026</p>
+                <p style="font-size:11px;color:var(--fg3);margin-bottom:18px">IDLR App — Internet Downloader · Effective 2026</p>
                 <div class="modal-section"><h4>1. Acceptance</h4><p>By using IDLR, you agree to these Terms. If you disagree, please do not use the App.</p></div>
                 <div class="modal-section"><h4>2. Your Responsibility</h4><p>You are solely responsible for how you use IDLR. Only download content you own, have rights to, or that is freely licensed. Downloading copyrighted content without permission may violate the law.</p></div>
                 <div class="modal-section"><h4>3. Copyright Policy</h4><p>IDLR is intended for public domain content, Creative Commons content, content you own, or content platforms explicitly allow downloading. Respect creators' rights.</p></div>
@@ -3078,16 +3884,45 @@
             </div>
         </div>
 
+        <div class="modal-bg" id="path-modal" style="display:none" onclick="if(event.target===this)closePathDialog()">
+            <div class="modal" style="width:min(460px,calc(100vw - 28px))">
+                <button class="modal-close" onclick="closePathDialog()">✕</button>
+                <h3>📁 Choose Save Folder</h3>
+                <p style="font-size:12px;color:var(--fg3);margin-bottom:16px">Enter the full folder path where IDLR should save downloads.</p>
+                <div class="field"><label>Folder path</label><input id="path-input" type="text" autocomplete="off" /></div>
+                <div class="auth-err" id="path-err"></div>
+                <button class="btn-red" id="path-save-btn" onclick="savePathFromInput()">Use This Folder</button>
+            </div>
+        </div>
+
         <!-- Profile modal -->
         <div class="modal-bg" id="prof-modal" style="display:none" onclick="if(event.target===this)closeProfModal()">
             <div class="modal profile-modal"><button class="modal-close" onclick="closeProfModal()">✕</button>
-                <div class="prof-banner"></div>
+                <div class="prof-banner" id="prof-banner">
+                    <img id="prof-banner-img" alt="" style="display:none" />
+                    <button class="prof-cover-edit" onclick="openImageStudio('banner')">✦ Edit cover</button>
+                </div>
                 <div style="display:flex;align-items:flex-end;gap:14px;margin-bottom:16px">
-                    <div class="prof-av-wrap" onclick="document.getElementById('prof-av-input').click()">
+                    <div class="prof-av-wrap" onclick="openImageStudio('avatar')" title="Change profile picture">
                         <div class="prof-av" id="prof-av-circle"><span id="prof-av-init">?</span></div>
-                        <input type="file" id="prof-av-input" accept="image/*" onchange="uploadAvatar(this)" />
+                        <span class="prof-photo-action">✎</span>
                     </div>
                     <div><div style="font-size:18px;font-weight:700" id="prof-disp-name">—</div><div style="font-size:12px;color:var(--fg3)" id="prof-disp-user">—</div></div>
+                </div>
+                <div class="prof-image-studio" id="prof-image-studio" hidden>
+                    <div class="prof-studio-head">
+                        <div>
+                            <div class="prof-studio-title">Your image library</div>
+                            <div class="prof-studio-sub">Uploads are saved in the order you add them. Choose a picture to use it, then save your profile.</div>
+                        </div>
+                        <div class="prof-studio-targets">
+                            <button type="button" class="prof-target-btn active" data-prof-target="avatar" onclick="setImageTarget('avatar')">Avatar</button>
+                            <button type="button" class="prof-target-btn" data-prof-target="banner" onclick="setImageTarget('banner')">Cover</button>
+                        </div>
+                    </div>
+                    <input type="file" id="prof-image-input" accept="image/png,image/jpeg,image/webp" hidden onchange="uploadProfileImage(this)" />
+                    <button type="button" class="prof-image-upload" onclick="document.getElementById('prof-image-input').click()">＋ Add an image to your library</button>
+                    <div class="prof-image-gallery" id="prof-image-gallery"></div>
                 </div>
                 <div class="prof-stat-row">
                     <div class="prof-stat"><div class="prof-stat-n" id="prof-dl-count">0</div><div class="prof-stat-l">Downloads</div></div>
@@ -3152,10 +3987,10 @@
                 <p style="font-size:11px;color:var(--fg3);margin-bottom:16px">Switch between accounts or add a new one. Unlimited accounts supported.</p>
                 <div id="acct-list" style="display:flex;flex-direction:column;gap:7px;margin-bottom:14px"></div>
                 <div class="settings-section-label" style="margin-top:4px">Add Account</div>
-                <button class="acct-add-btn" onclick="closeAccountSwitcher();document.getElementById('login-screen').style.display='flex';document.getElementById('main-app').classList.remove('on');document.getElementById('auth-head').textContent='Create account';toggleAuthMode()">
+                <button class="acct-add-btn" onclick="beginAddAccount('email')">
                     ✉️ &nbsp;Add with Email &amp; Password
                 </button>
-                <button class="acct-add-btn google" onclick="closeAccountSwitcher();document.getElementById('login-screen').style.display='flex';document.getElementById('main-app').classList.remove('on');showGDlg()">
+                <button class="acct-add-btn google" onclick="beginAddAccount('google')">
                     🔵 &nbsp;Continue with Google
                 </button>
             </div>
@@ -3165,23 +4000,31 @@
         <div class="modal-bg whatsnew-modal" id="whatsnew-modal" style="display:none" onclick="if(event.target===this)closeWhatsNew()">
             <div class="modal">
                 <button class="modal-close" onclick="closeWhatsNew()">✕</button>
-                <h3>🎉 What's New — v1.2.0</h3>
+                <h3>🎉 What's New — v2.0.0</h3>
                 <div class="whatsnew-list">
                     <div class="whatsnew-item">
-                        <span class="icon">🎨</span>
-                        <span class="text"><strong>Themes are here</strong> — Midnight, Light, Ocean, Sunset, Forest &amp; Rosegold. Pick one in Settings → Theme, it remembers you.</span>
+                        <span class="icon">🖥️</span>
+                        <span class="text"><strong>Native IDLR desktop app</strong> — runs in its own Tauri window and keeps media processing in a bundled background worker.</span>
                     </div>
                     <div class="whatsnew-item">
-                        <span class="icon">💧</span>
-                        <span class="text"><strong>Liquid Glass + Calm Motion</strong> — frosted blur toggle and animation-killer, just like Nebula Cloud.</span>
+                        <span class="icon">✨</span>
+                        <span class="text"><strong>Smoother desktop and downloads</strong> — the native window uses an available local port, and open format menus now stay above nearby cards.</span>
                     </div>
                     <div class="whatsnew-item">
-                        <span class="icon">🎛️</span>
-                        <span class="text"><strong>5 new toggles</strong> — Link Preview, Download Alerts, Confirm Before Delete, Liquid Glass, Calm Motion. Every row now explains its live state.</span>
+                        <span class="icon">📁</span>
+                        <span class="text"><strong>Choose a real save folder</strong> — the desktop app opens your system folder picker and checks that the folder is writable before saving it.</span>
                     </div>
                     <div class="whatsnew-item">
-                        <span class="icon">📱</span>
-                        <span class="text"><strong>Settings fits every device</strong> — bottom-sheet on phones, wider grid on desktop, keyboard-friendly switches.</span>
+                        <span class="icon">👥</span>
+                        <span class="text"><strong>Switch or add accounts</strong> — switch between saved users, or start a clean sign-in/registration flow without losing your other accounts.</span>
+                    </div>
+                    <div class="whatsnew-item">
+                        <span class="icon">✓</span>
+                        <span class="text"><strong>Safer folder selection</strong> — invalid or unwritable paths are reported before a download starts.</span>
+                    </div>
+                    <div class="whatsnew-item">
+                        <span class="icon">🌐</span>
+                        <span class="text"><strong>Browser fallback</strong> — when running in a browser, enter a folder path in IDLR’s dialog; the browser cannot expose native folders to apps.</span>
                     </div>
                 </div>
                 <button class="btn-red" onclick="closeWhatsNew()" style="margin-top:4px">Got it!</button>
@@ -3192,34 +4035,36 @@
         <div id="main-app">
             <div class="topbar">
                 <div class="tbar-logo" onclick="gotoTab('dl')">
-                    <svg width="30" height="30" viewBox="0 0 64 64"><defs><linearGradient id="lg2" x1="0%" y1="0%" x2="100%" y2="100%"><stop offset="0%" stop-color="#ff2828"/><stop offset="100%" stop-color="#cc0000"/></linearGradient></defs><rect width="64" height="64" rx="14" fill="url(#lg2)"/><rect width="64" height="32" rx="14" fill="white" fill-opacity=".1"/><polygon points="24,16 24,48 48,32" fill="white"/></svg>
+                    <svg width="30" height="30" viewBox="0 0 64 64" aria-hidden="true"><defs><linearGradient id="idlr-mark-nav" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#ff5b56"/><stop offset="1" stop-color="#d9133b"/></linearGradient></defs><rect width="64" height="64" rx="19" fill="url(#idlr-mark-nav)"/><path d="M32 14v23m0 0 9-9m-9 9-9-9M19 45h26" fill="none" stroke="#fff" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"/></svg>
                     <div><div class="tbar-name-short">IDLR</div><div class="tbar-name-full">Internet Downloader</div></div>
                 </div>
                 <nav class="topnav" id="topnav">
-                    <button class="nav-btn active" data-tab="dl" onclick="gotoTab('dl')">⬇ Download</button>
-                    <button class="nav-btn" data-tab="hist" onclick="gotoTab('hist')">🕘 History</button>
+                    <button class="nav-btn active" data-tab="dl" aria-current="page" onclick="gotoTab('dl')">⬇ Download</button>
+                    <button class="nav-btn" data-tab="hist" aria-current="false" onclick="gotoTab('hist')">🕘 History</button>
                     <div class="tab-indicator" id="tab-indicator"></div>
                 </nav>
                 <div style="display:flex;align-items:center;gap:8px;margin-left:auto">
                     <!-- Notification Bell -->
                     <div class="notif-wrapper icon-btn-wrapper">
-                        <button class="settings-trigger" id="notif-trigger" onclick="toggleNotifPopover()" title="">
+                        <button class="settings-trigger" id="notif-trigger" onclick="toggleNotifPopover()" title="Notifications" aria-expanded="false" aria-controls="notif-popover">
                             🔔
                             <span class="notif-badge" id="notif-badge" style="display:none;">0</span>
                             <span class="tooltip">Notifications</span>
                         </button>
-                        <div class="notif-popover" id="notif-popover">
+                        <div class="notif-popover" id="notif-popover" role="dialog" aria-label="Notifications">
                             <div class="pop-header">
-                                <h4>Notifications</h4>
-                                <button class="notif-close" onclick="closeNotifPopover()" title="Close">✕</button>
+                                <h4>Notifications <span class="notif-count-pill" id="notif-count-pill" style="display:none">0</span></h4>
+                                <div class="notif-head-actions">
+                                    <button class="notif-mark-read" id="notif-mark-read" onclick="markAllNotificationsRead()" title="Mark all notifications as read">Mark all read</button>
+                                    <button class="notif-close" onclick="closeNotifPopover()" title="Close notifications" aria-label="Close notifications">✕</button>
+                                </div>
                             </div>
                             <div class="pop-body">
-                                <div class="notif-list" id="notif-list">
-                                    <div class="notif-empty">No notifications</div>
+                                <div class="notif-list" id="notif-list" role="list">
+                                    <div class="notif-empty"><span class="notif-empty-ico">🔔</span>All caught up — no notifications.</div>
                                 </div>
-                                <button class="pop-action" onclick="clearAllNotifications()">
-                                    <div class="pop-action-ico" style="background:rgba(255,32,32,.1);color:var(--red)">🗑</div>
-                                    Clear All
+                                <button class="notif-clear-all" id="notif-clear-all" onclick="clearAllNotifications()" title="Delete all saved notifications" disabled>
+                                    Clear notifications
                                 </button>
                             </div>
                         </div>
@@ -3245,9 +4090,9 @@
                     </div>
 
                     <!-- User chip -->
-                    <div class="user-chip" id="user-chip" onclick="openProfModal();event.stopPropagation()">
+                    <div class="user-chip" id="user-chip" onclick="toggleUserPopover(event)">
                         <div class="chip-btn">
-                            <div class="chip-av" id="chip-av"><span id="chip-init">?</span></div>
+                            <div class="chip-av" id="chip-av" onclick="openProfModal();event.stopPropagation()"><span id="chip-init">?</span></div>
                             <div class="chip-info">
                                 <span class="chip-name" id="chip-name">—</span>
                                 <span class="chip-handle" id="chip-handle"></span>
@@ -3255,7 +4100,7 @@
                             <svg class="chip-caret-svg" width="10" height="6" viewBox="0 0 10 6" fill="none"><path d="M1 1l4 4 4-4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
                             <span class="tooltip">My Profile</span>
                         </div>
-                        <div class="user-popover" id="user-popover">
+                        <div class="user-popover" id="user-popover" onclick="event.stopPropagation()">
                             <div class="pop-banner">
                                 <span class="pop-edit-hint" onclick="openProfModal();closePopover();event.stopPropagation()">✏️ Edit Profile</span>
                                 <div class="pop-av-outer" id="pop-av-outer" onclick="openProfModal();closePopover();event.stopPropagation()">
@@ -3311,12 +4156,12 @@
                     <div class="info-hero">
                         <div class="info-hero-logo">IDL</div>
                         <div>
-                            <div class="info-hero-name">IDLR <span class="info-hero-ver">v1.2.0</span></div>
+                            <div class="info-hero-name">IDLR <span class="info-hero-ver">v2.0.0</span></div>
                             <div class="info-hero-sub">Internet Downloader — grab video &amp; audio from 1000+ sites. Runs 100% on your PC, zero tracking.</div>
                         </div>
                     </div>
                     <div class="info-stats">
-                        <div class="info-stat"><div class="info-stat-n" id="info-ver">v1.2.0</div><div class="info-stat-l">App</div></div>
+                        <div class="info-stat"><div class="info-stat-n" id="info-ver">v2.0.0</div><div class="info-stat-l">App</div></div>
                         <div class="info-stat"><div class="info-stat-n" id="info-ytdlp">…</div><div class="info-stat-l">yt-dlp</div></div>
                         <div class="info-stat"><div class="info-stat-n" id="info-ffmpeg">…</div><div class="info-stat-l">FFmpeg</div></div>
                     </div>
@@ -3340,7 +4185,7 @@
                         <span class="info-chip">+ 1000 via yt-dlp</span>
                     </div>
                     <div class="settings-section-label">System status</div>
-                    <div class="info-sysrow"><span>Network URL</span><b id="info-network">localhost:5000</b></div>
+                    <div class="info-sysrow"><span id="info-network-label">Network URL</span><b id="info-network">Unavailable</b></div>
                     <div class="info-sysrow"><span>Save folder</span><b id="info-savepath">~/Downloads</b></div>
                     <div class="settings-section-label">Legal &amp; Support</div>
                     <div class="about-legal-list">
@@ -3365,7 +4210,7 @@
                             Send Feedback
                         </button>
                     </div>
-                    <div style="margin-top:16px;font-size:10px;color:var(--fg3);text-align:center;">© 2026 IDLR · v1.2.0 · made for fast, private downloading</div>
+                    <div style="margin-top:16px;font-size:10px;color:var(--fg3);text-align:center;">© 2026 IDLR · v2.0.0 · made for fast, private downloading</div>
                 </div>
             </div>
 
@@ -3472,6 +4317,7 @@
                         </div>
                         <div style="display:flex;gap:12px;flex-wrap:wrap;align-items:center">
                             <button class="dl-btn" id="dl-btn" onclick="go()">⬇ Download Now</button>
+                            <button class="cancel-btn" id="thumb-btn" onclick="dlThumb()">🖼 Thumbnail</button>
                             <button class="cancel-btn" onclick="cancelDl()">✕ Cancel</button>
                         </div>
                         <div class="prog-wrap" id="prog-wrap" style="display:none">
@@ -3486,15 +4332,26 @@
                 <!-- ── HISTORY ── -->
                 <div class="page" id="page-hist">
                     <div class="hist-header">
-                        <h2>📋 Download History</h2>
+                        <div class="hist-heading-copy">
+                            <h2>📋 Download History</h2>
+                            <p>Your downloads, favorites, and saved items — all in one place.</p>
+                        </div>
                         <div class="hist-actions-bar">
                             <div class="hist-search-wrap">
                                 <input type="text" id="hist-search" placeholder="Search history…" oninput="filterHistory()" />
                                 <button class="clear-search" id="clear-search-btn" onclick="clearSearch()">✕</button>
                             </div>
                             <button class="pill outline" id="select-toggle-btn" onclick="toggleSelectMode()" style="font-size:11px">☑ Select</button>
-                            <button class="pill outline" onclick="clearHist()">🗑 Clear All</button>
+                            <button class="pill outline" id="clear-all-btn" onclick="clearHist()">🗑 Clear All</button>
+                            <button class="pill outline" id="trash-restore-btn" onclick="restoreAllTrash()" style="display:none">↩ Restore All</button>
+                            <button class="pill outline" id="trash-empty-btn" onclick="emptyTrash()" style="display:none">🗑 Empty Trash</button>
                         </div>
+                    </div>
+                    <div class="hist-tabs" id="hist-tabs" role="tablist" aria-label="Download history filters">
+                        <button class="hist-tab active" data-htab="files" role="tab" aria-selected="true" onclick="setHistTab('files')" title="All downloads"><span class="hist-tab-label">📁 Files</span><span class="hist-tab-cnt" id="cnt-files"></span></button>
+                        <button class="hist-tab" data-htab="fav" role="tab" aria-selected="false" onclick="setHistTab('fav')" title="Starred downloads — tap ★ on any row to pin it here"><span class="hist-tab-label">★ Favorites</span><span class="hist-tab-cnt" id="cnt-fav"></span></button>
+                        <button class="hist-tab" data-htab="recent" role="tab" aria-selected="false" onclick="setHistTab('recent')" title="Downloads from the last 7 days"><span class="hist-tab-label">🕘 Recent</span><span class="hist-tab-cnt" id="cnt-recent"></span></button>
+                        <button class="hist-tab" data-htab="trash" role="tab" aria-selected="false" onclick="setHistTab('trash')" title="Deleted items — restore them or empty the trash"><span class="hist-tab-label">🗑 Trash</span><span class="hist-tab-cnt" id="cnt-trash"></span></button>
                     </div>
                     <div class="hist-bulk-bar" id="hist-bulk-bar">
                         <div class="bulk-count" id="bulk-count">0 selected</div>
@@ -3510,7 +4367,7 @@
             </div>
 
             <div class="footer-bar">
-                <span>© 2026 IDLR — Internet Downloader</span><span class="footer-sep">·</span>
+                <span>© 2026 IDLR App — Internet Downloader</span><span class="footer-sep">·</span>
                 <span>YouTube · Spotify · TikTok · 1000+ Sites</span><span class="footer-sep">·</span>
             </div>
         </div>
@@ -3525,7 +4382,7 @@
                         <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>
                     </svg>
                     Settings
-                    <span class="settings-ver-pill" id="settings-ver">v1.2.0</span>
+                    <span class="settings-ver-pill" id="settings-ver">v2.0.0</span>
                 </h3>
                 <p class="settings-head-sub">Every switch works instantly and is saved on this device.</p>
 
@@ -3636,21 +4493,29 @@
                     <div class="setting-row" style="cursor:default">
                         <div class="setting-row-ico" style="background:rgba(30,215,96,.1);color:var(--grn)">🌐</div>
                         <div class="setting-row-text">
-                            <div class="setting-row-title">Network URL</div>
-                            <div class="setting-row-sub">Share on your network</div>
+                            <div class="setting-row-title" id="sp-network-title">Network URL</div>
+                            <div class="setting-row-sub" id="sp-network-sub">Open the local IDLR interface</div>
                         </div>
                         <div class="setting-row-right">
-                            <button class="copy-btn" onclick="copyNetworkUrl(event)" title="Copy network URL">
+                            <button class="copy-btn" onclick="copyNetworkUrl(event)" title="Copy browser URL">
                                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
                                 <span id="sp-network">localhost:5000</span>
                             </button>
                         </div>
                     </div>
+                    <div class="setting-row app-update-disabled" id="app-update-row" onclick="checkAppUpdateFromPanel(this)" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();checkAppUpdateFromPanel(this)}" tabindex="0" role="button" aria-disabled="true" title="App updates are available in the installed desktop app.">
+                        <div class="setting-row-ico" style="background:var(--redsoft);color:var(--red)">⬆</div>
+                        <div class="setting-row-text">
+                            <div class="setting-row-title" id="app-update-title">Check for IDLR updates</div>
+                            <div class="setting-row-sub" id="app-update-sub">Available in the installed desktop app</div>
+                        </div>
+                        <div class="setting-row-right" aria-hidden="true">›</div>
+                    </div>
                     <div class="setting-row" onclick="doUpdateFromPanel(this)">
                         <div class="setting-row-ico" style="background:rgba(245,158,11,.1);color:var(--ylw)">🔄</div>
                         <div class="setting-row-text">
-                            <div class="setting-row-title" id="sp-update-title">Update yt-dlp + spotdl</div>
-                            <div class="setting-row-sub" id="sp-update-sub">Keep downloaders latest</div>
+                            <div class="setting-row-title" id="sp-update-title">Update download engine</div>
+                            <div class="setting-row-sub" id="sp-update-sub">Check for the latest downloader</div>
                         </div>
                         <div class="setting-row-right">
                             <span class="setting-row-right">›</span>
@@ -3727,7 +4592,7 @@
                 </div>
 
                 <div style="text-align:center;padding:20px 0 4px;font-size:10px;color:var(--fg3)">
-                    IDLR — Internet Downloader · © 2026 · <span id="settings-ver-foot">v1.2.0</span>
+                    IDLR App — Internet Downloader · © 2026 · <span id="settings-ver-foot">v2.0.2</span>
                 </div>
             </div>
         </div>
@@ -3744,10 +4609,17 @@
             _es = null;
         let _dd = { mode: 'Video', quality: 'Best (Max Quality)', format: 'mp4' };
         let _savedPath = '';
-        let _selectMode = false;
+        // Real default folder, resolved by the SERVER (never a %VAR% placeholder).
+        let _serverDefaultPath = '';
         let _selected = new Set();
         let _histItems = [];
         let _searchQuery = '';
+        let _profileImages = [];
+        let _profileDraft = { avatar: '', banner: '' };
+        let _imageTarget = 'avatar';
+        let _updaterInfo = null;
+        let _activeJobId = '';
+        let _jobLogsSeen = 0;
 
         // Notification system
         let notifications = [];
@@ -3759,10 +4631,15 @@
                 const saved = localStorage.getItem('idlr_notifications');
                 if (saved) {
                     const parsed = JSON.parse(saved);
-                    notifications = parsed;
-                    if (notifications.length > 0) {
-                        notifId = notifications[0].id || 0;
-                    }
+                    notifications = Array.isArray(parsed) ? parsed
+                        .filter(n => n && typeof n === 'object' && typeof n.message === 'string')
+                        .slice(0, 50)
+                        .map((n, i) => ({
+                            ...n,
+                            id: Number.isSafeInteger(n.id) ? n.id : i + 1,
+                            read: n.read !== false,
+                        })) : [];
+                    notifId = notifications.reduce((max, n) => Math.max(max, n.id), 0);
                 }
             } catch (e) { console.warn('Failed to load notifications', e); }
             renderNotifications();
@@ -3775,7 +4652,8 @@
             } catch (e) { console.warn('Failed to save notifications', e); }
         }
 
-        const DPATH = navigator.platform.includes('Win') ? '%USERPROFILE%\\Downloads' : '~/Downloads';
+        const DPATH = '~/Downloads'; // last-resort label; replaced by server path
+        function currentSavePath() { return _savedPath || _serverDefaultPath || DPATH; }
 
         /* ══ UTILS ══ */
         function toast(msg, type = '') {
@@ -3846,39 +4724,52 @@
 
         /* ══ NOTIFICATIONS ══ */
         function addNotification(message, type = 'info') {
-            // Avoid duplicate "Welcome back" on refresh
-            if (message.includes('Welcome back') && sessionStorage.getItem('idlr_welcome_shown')) {
-                return;
-            }
-            if (message.includes('Welcome back')) {
-                sessionStorage.setItem('idlr_welcome_shown', 'true');
-            }
             const now = new Date();
             const dateStr = now.toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' });
             const timeStr = now.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' });
             const timestamp = dateStr + ' at ' + timeStr;
-            const entry = { id: ++notifId, message, type, timestamp };
+            const entry = { id: ++notifId, message, type, timestamp, read: false };
             notifications.unshift(entry);
+            notifications = notifications.slice(0, 50); // keep the list meaningful
             renderNotifications();
             updateBadge();
             saveNotifications();
         }
 
+        const NOTIF_META = {
+            success: { ico: '✓', cls: 'success' },
+            error:   { ico: '✕', cls: 'error' },
+            update:  { ico: '⟳', cls: 'update' },
+            info:    { ico: 'ℹ', cls: 'info' },
+        };
+
         function renderNotifications() {
             const list = document.getElementById('notif-list');
             if (!list) return;
+            const pill = document.getElementById('notif-count-pill');
+            const markRead = document.getElementById('notif-mark-read');
+            const clearAll = document.getElementById('notif-clear-all');
+            if (markRead) markRead.disabled = !notifications.some(n => !n.read);
+            if (clearAll) clearAll.disabled = notifications.length === 0;
+            if (pill) {
+                pill.textContent = notifications.length ? (notifications.length > 99 ? '99+' : notifications.length) : '0';
+                pill.style.display = notifications.length ? '' : 'none';
+            }
             if (notifications.length === 0) {
-                list.innerHTML = '<div class="notif-empty">No notifications</div>';
+                list.innerHTML = '<div class="notif-empty"><span class="notif-empty-ico">🔔</span>All caught up — no notifications.</div>';
                 return;
             }
-            list.innerHTML = notifications.map(n =>
-                `<div class="notif-item">
-                    <span class="notif-type">${n.type === 'update' ? '🔄' : n.type === 'success' ? '✅' : 'ℹ️'}</span>
-                    <span>${esc(n.message)}</span>
-                    <span class="notif-time">${esc(n.timestamp)}</span>
-                    <button class="notif-del" onclick="deleteNotification(${n.id})" title="Delete">✕</button>
-                </div>`
-            ).join('');
+            list.innerHTML = notifications.map((n, i) => {
+                const meta = NOTIF_META[n.type] || NOTIF_META.info;
+                return `<div class="notif-item${n.read ? '' : ' unread'}" role="listitem" style="animation-delay:${Math.min(i * 40, 400)}ms">
+                    <span class="notif-ico ${meta.cls}">${meta.ico}</span>
+                    <span class="notif-body">
+                        <span class="notif-msg">${esc(n.message)}</span>
+                        <span class="notif-time">${esc(n.timestamp)}</span>
+                    </span>
+                    <button class="notif-del" onclick="deleteNotification(${n.id})" title="Delete notification" aria-label="Delete notification">✕</button>
+                </div>`;
+            }).join('');
         }
 
         function deleteNotification(id) {
@@ -3890,8 +4781,12 @@
 
         function updateBadge() {
             const badge = document.getElementById('notif-badge');
+            const trigger = document.getElementById('notif-trigger');
+            const count = notifications.filter(n => !n.read).length;
+            if (trigger) trigger.title = count
+                ? `${count} unread notification${count === 1 ? '' : 's'}`
+                : 'Notifications';
             if (!badge) return;
-            const count = notifications.length;
             if (count > 0) {
                 badge.style.display = 'flex';
                 badge.textContent = count > 99 ? '99+' : count;
@@ -3902,15 +4797,26 @@
 
         function toggleNotifPopover() {
             const pop = document.getElementById('notif-popover');
-            pop.classList.toggle('open');
+            const isOpen = pop.classList.toggle('open');
+            document.getElementById('notif-trigger')?.setAttribute('aria-expanded', String(isOpen));
             document.getElementById('user-chip').classList.remove('open');
         }
 
         function closeNotifPopover() {
             document.getElementById('notif-popover').classList.remove('open');
+            document.getElementById('notif-trigger')?.setAttribute('aria-expanded', 'false');
+        }
+
+        function markAllNotificationsRead() {
+            if (!notifications.some(n => !n.read)) return;
+            notifications = notifications.map(n => ({ ...n, read: true }));
+            renderNotifications();
+            updateBadge();
+            saveNotifications();
         }
 
         function clearAllNotifications() {
+            if (!notifications.length) return;
             notifications = [];
             renderNotifications();
             updateBadge();
@@ -3935,7 +4841,7 @@
             if (m) m.classList.add('closing');
             setTimeout(() => { bg.style.display = 'none';
                 bg.classList.remove('closing'); if (m) m.classList.remove('closing'); }, 250);
-            localStorage.setItem('idlr_whatsnew_v120_shown', 'true');
+            localStorage.setItem('idlr_whatsnew_v180_shown', 'true');
         }
 
         /* ══ FEEDBACK MODAL ══ */
@@ -3988,7 +4894,7 @@
             try { loadInfo(); } catch (e) {}
             try {
                 const sp = document.getElementById('info-savepath');
-                if (sp) sp.textContent = (_savedPath || DPATH || '~/Downloads');
+                if (sp) sp.textContent = currentSavePath();
             } catch (e) {}
         }
 
@@ -4020,7 +4926,10 @@
         function gotoTab(n) {
             ['dl', 'hist'].forEach(t => {
                 const b = document.querySelector(`.nav-btn[data-tab="${t}"]`);
-                if (b) b.className = 'nav-btn' + (t === n ? ' active' : '');
+                    if (b) {
+                        b.className = 'nav-btn' + (t === n ? ' active' : '');
+                        b.setAttribute('aria-current', t === n ? 'page' : 'false');
+                    }
                 const p = document.getElementById('page-' + t);
                 if (p) p.className = 'page' + (t === n ? ' on' : '');
             });
@@ -4049,7 +4958,7 @@
         }
 
         /* ══ POPOVER ══ */
-        function togglePopover(e) { e.stopPropagation();
+        function toggleUserPopover(e) { e.stopPropagation();
             document.getElementById('user-chip').classList.toggle('open'); }
 
         function closePopover() { document.getElementById('user-chip').classList.remove('open'); }
@@ -4063,7 +4972,8 @@
             const o = p.classList.contains('open');
             closeAllDD();
             if (!o) { p.classList.add('open');
-                t.classList.add('open'); }
+                t.classList.add('open');
+                p.closest('.card')?.classList.add('dropdown-open'); }
         }
 
         function closeAllDD() {
@@ -4073,12 +4983,16 @@
                 if (panel) panel.classList.remove('open');
                 if (trigger) trigger.classList.remove('open');
             });
+            document.querySelectorAll('.card.dropdown-open').forEach(card => card.classList.remove('dropdown-open'));
         }
 
         // Click outside to close dropdowns
         document.addEventListener('click', function(e) {
             if (!e.target.closest('.opt-group')) {
                 closeAllDD();
+            }
+            if (!e.target.closest('.notif-wrapper')) {
+                closeNotifPopover();
             }
         });
 
@@ -4138,9 +5052,9 @@
         const SITES = [
             { key: 'yt', name: 'YouTube', emoji: '▶️', cls: 'yt', test: u => /youtube\.com|youtu\.be/.test(u),
                 autoMode: u => /list=/.test(u) ? 'Playlist — Video' : 'Video', autoFmt: 'mp4',
-            note: u => /list=/.test(u) ? 'Playlist detected → Playlist mode' : 'YouTube video detected' },
+            note: u => /\/shorts\//.test(u) ? 'YouTube Short detected — vertical video' : /list=/.test(u) ? 'Playlist detected → Playlist mode' : 'YouTube video detected' },
             { key: 'sp', name: 'Spotify', emoji: '🎵', cls: 'sp', test: u => /spotify\.com|^spotify:/.test(u),
-                autoMode: () => 'Audio Only', autoFmt: 'mp3', note: () => 'Spotify → uses spotdl, saves as MP3' },
+                autoMode: () => 'Audio Only', autoFmt: 'mp3', note: () => 'Spotify → MP3 (auto-fallback to YouTube match if needed)' },
             { key: 'sc', name: 'SoundCloud', emoji: '🔶', cls: 'sc', test: u => /soundcloud\.com/.test(u),
                 autoMode: () => 'Audio Only', autoFmt: 'mp3', note: () => 'SoundCloud → Audio MP3' },
             { key: 'tt', name: 'TikTok', emoji: '📱', cls: 'tt', test: u => /tiktok\.com/.test(u), autoMode: () =>
@@ -4260,9 +5174,9 @@
         function setAE(m) { const e = document.getElementById('auth-err'); if (e) { e.textContent = m;
                 e.style.display = m ? 'block' : 'none'; } }
 
-        function toggleAuthMode() {
-            _authMode = _authMode === 'login' ? 'register' : 'login';
-            const r = _authMode === 'register';
+        function setAuthMode(mode, clearFields = true) {
+            _authMode = mode;
+            const r = mode === 'register';
             document.getElementById('auth-head').textContent = r ? 'Create account' : 'Welcome back';
             document.getElementById('auth-btn').textContent = r ? 'Create Account' : 'Sign In';
             document.getElementById('sw-txt').textContent = r ? 'Already have one?' : 'No account?';
@@ -4270,8 +5184,12 @@
             document.getElementById('f-name').style.display = r ? 'block' : 'none';
             document.getElementById('f-cpw').style.display = r ? 'block' : 'none';
             setAE('');
-            ['inp-name', 'inp-email', 'inp-pw', 'inp-cpw'].forEach(id => { const el = document.getElementById(id); if (el)
+            if (clearFields) ['inp-name', 'inp-email', 'inp-pw', 'inp-cpw'].forEach(id => { const el = document.getElementById(id); if (el)
                     el.value = ''; });
+        }
+
+        function toggleAuthMode() {
+            setAuthMode(_authMode === 'login' ? 'register' : 'login');
         }
 
         async function doAuth() {
@@ -4314,6 +5232,20 @@
                 bg.classList.remove('closing'); if (m) m.classList.remove('closing'); }, 250);
         }
 
+        function beginAddAccount(method) {
+            closeAccountSwitcher();
+            U = null;
+            try { localStorage.removeItem('idlr_u'); } catch (error) { console.warn('Could not clear active session', error); }
+            document.getElementById('main-app').classList.remove('on');
+            document.getElementById('login-screen').style.display = 'flex';
+            if (method === 'google') {
+                showGDlg();
+                return;
+            }
+            setAuthMode('register');
+            document.getElementById('inp-email').focus();
+        }
+
         function showGDlg() {
             const bg = document.getElementById('gdlg');
             bg.style.display = 'flex';
@@ -4345,7 +5277,7 @@
         }
 
         /* ══ LAUNCH / SESSION ══ */
-        function launch(user) {
+        function launch(user, isRestore = false) {
             if (!user || !user.email) { console.warn('launch: invalid user'); return; }
             U = user;
             // Save session only if the "Save Login Session" toggle is ON
@@ -4362,21 +5294,29 @@
             try { fillUserUI(); } catch (e) { console.warn('fillUserUI error', e); }
             try { applyPrefs(user.prefs || {}); } catch (e) {}
             const storedPath = localStorage.getItem('idlr_savepath');
-            if (user.prefs?.savepath && user.prefs.savepath.trim()) {
+            // Drop legacy broken values (literal %USERPROFILE% / %VAR% placeholders).
+            const cleanStored = (storedPath && !storedPath.includes('%')) ? storedPath : '';
+            if (!cleanStored && storedPath) { try { localStorage.removeItem('idlr_savepath'); } catch (e) {} }
+            if (user.prefs?.savepath && user.prefs.savepath.trim() && !user.prefs.savepath.includes('%')) {
                 _savedPath = user.prefs.savepath.trim();
-            } else if (storedPath) {
-                _savedPath = storedPath;
+            } else if (cleanStored) {
+                _savedPath = cleanStored;
+            } else {
+                _savedPath = '';
             }
             try { updatePathDisplay(); } catch (e) {}
             setTimeout(() => updateTabIndicator('dl'), 50);
-            const isNew = !user.prefs || !Object.keys(user.prefs).length;
-            toast(isNew ? `Welcome, ${user.name.split(' ')[0]}! 🎉` : `Hey ${user.name.split(' ')[0]}! 👋`, 'ok');
             loadInfo();
-            addNotification('Welcome back! Ready to download.', 'info');
             hideLoading();
+            if (!isRestore) {
+                // Greet + notify ONLY on a fresh sign-in — never on refresh.
+                const isNew = !user.prefs || !Object.keys(user.prefs).length;
+                toast(isNew ? `Welcome, ${user.name.split(' ')[0]}! 🎉` : `Hey ${user.name.split(' ')[0]}! 👋`, 'ok');
+                addNotification(`Welcome, ${user.name.split(' ')[0]}! Ready to download.`, 'info');
+            }
 
             // Show What's New for this version if not shown before
-            if (!localStorage.getItem('idlr_whatsnew_v120_shown')) {
+            if (!localStorage.getItem('idlr_whatsnew_v180_shown')) {
                 setTimeout(openWhatsNew, 800);
             }
         }
@@ -4423,9 +5363,19 @@
             localStorage.setItem('idlr_accounts', JSON.stringify(list));
         }
 
-        function openAccountSwitcher() {
+        async function openAccountSwitcher() {
             closePopover();
-            const list = getAccountList();
+            let list = getAccountList();
+            if (window.__TAURI__?.core?.invoke) {
+                try {
+                    const response = await fetch('/api/accounts');
+                    if (!response.ok) throw new Error('Could not load saved accounts.');
+                    list = await response.json();
+                    localStorage.setItem('idlr_accounts', JSON.stringify(list));
+                } catch (error) {
+                    toast(error.message || 'Could not load saved accounts.', 'err');
+                }
+            }
             const el = document.getElementById('acct-list');
             if (!el) return;
             el.innerHTML = '';
@@ -4462,19 +5412,25 @@
 
         async function switchAccount(acct) {
             closeAccountSwitcher();
+            U = null;
+            try { localStorage.removeItem('idlr_u'); } catch (error) { console.warn('Could not clear active session', error); }
             document.getElementById('main-app').classList.remove('on');
             document.getElementById('login-screen').style.display = 'flex';
-            const em = document.getElementById('inp-email');
-            if (em) { em.value = acct.email; }
             if (acct.method === 'google') {
                 try {
                     const r = await fetch('/api/google-login', { method: 'POST', headers: { 'Content-Type': 'application/json' },
                         body: JSON.stringify({ email: acct.email }) });
                     const d = await r.json();
-                    if (d.ok) { document.getElementById('login-screen').style.display = 'none';
-                        launch(d); } else { toast('Could not switch account: ' + d.error, 'err'); }
-                } catch { toast('Cannot reach server', 'err'); }
+                    if (!r.ok || !d.ok) throw new Error(d.error || 'Could not switch accounts.');
+                    launch(d);
+                } catch (error) {
+                    toast(error.message || 'Could not reach server.', 'err');
+                }
             } else {
+                setAuthMode('login');
+                const em = document.getElementById('inp-email');
+                if (em) em.value = acct.email;
+                document.getElementById('inp-pw').focus();
                 toast('Enter your password to switch to ' + acct.name, 'ok');
             }
         }
@@ -4488,13 +5444,13 @@
         }
 
         function updatePathDisplay() {
-            const display = _savedPath || DPATH;
+            const display = currentSavePath();
             ['path-txt'].forEach(id => { const el = document.getElementById(id); if (el) el.textContent = display; });
         }
 
         function fillUserUI() {
             if (!U) return;
-            const init = U.name[0].toUpperCase();
+            const init = (U.name || U.email || '?')[0].toUpperCase();
             const chipAv = document.getElementById('chip-av');
             if (chipAv) chipAv.innerHTML = U.avatar ? `<img src="${U.avatar}"/>` : `<span id="chip-init">${init}</span>`;
             const chipName = document.getElementById('chip-name');
@@ -4506,6 +5462,14 @@
                 pao.onclick = e => { openProfModal();
                     closePopover();
                     e.stopPropagation(); }; }
+            const popBanner = document.querySelector('.pop-banner');
+            if (popBanner) {
+                popBanner.style.backgroundImage = U.banner
+                    ? `linear-gradient(180deg,rgba(0,0,0,.08),rgba(0,0,0,.45)),url("${U.banner}")`
+                    : '';
+                popBanner.style.backgroundSize = 'cover';
+                popBanner.style.backgroundPosition = 'center';
+            }
             const pdn = document.getElementById('pop-disp-name');
             if (pdn) pdn.textContent = U.name;
             const pdu = document.getElementById('pop-disp-username');
@@ -4518,7 +5482,7 @@
             if (U.email) {
                 fetch('/api/history?user=' + encodeURIComponent(U.email)).then(r => r.json()).then(items => {
                     const el = document.getElementById('pop-stat-dl');
-                    if (el) el.textContent = items.length;
+                    if (el) el.textContent = items.filter(i => !i.trashed).length;
                 }).catch(() => {});
             }
         }
@@ -4556,7 +5520,7 @@
         }
 
         async function savePrefs() {
-            if (!U) return;
+            if (!U) return false;
             const prefs = { mode: _dd.mode, quality: _dd.quality, format: _dd.format, savepath: _savedPath || '' };
             U.prefs = prefs;
             // Save session only if the toggle is ON
@@ -4566,32 +5530,120 @@
             }
             if (_savedPath) localStorage.setItem('idlr_savepath', _savedPath);
             try {
-                await fetch('/api/prefs', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+                const response = await fetch('/api/prefs', { method: 'POST', headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ user: U.email, prefs }) });
-            } catch (e) { console.warn('savePrefs network error', e); }
-        }
-
-        function changePath() {
-            const np = prompt('Enter save folder path:', _savedPath || DPATH);
-            if (np && np.trim()) {
-                _savedPath = np.trim();
-                updatePathDisplay();
-                savePrefs();
-                toast('Save folder updated ✓', 'ok');
+                if (!response.ok) {
+                    console.warn('savePrefs server error', response.status);
+                    return false;
+                }
+                return true;
+            } catch (e) {
+                console.warn('savePrefs network error', e);
+                return false;
             }
         }
 
-        /* ══ COPY NETWORK URL ══ */
+        function closePathDialog() {
+            const modal = document.getElementById('path-modal');
+            if (modal) modal.style.display = 'none';
+        }
+
+        function openPathDialog() {
+            const modal = document.getElementById('path-modal');
+            const input = document.getElementById('path-input');
+            const error = document.getElementById('path-err');
+            if (!modal || !input || !error) return;
+            input.value = currentSavePath();
+            error.textContent = '';
+            error.style.display = 'none';
+            modal.style.display = 'flex';
+            input.focus();
+            input.select();
+        }
+
+        async function saveSelectedPath(path) {
+            const response = await fetch('/api/validate-save-path', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ path })
+            });
+            const result = await response.json();
+            if (!response.ok) throw new Error(result.error || 'That folder cannot be used.');
+            _savedPath = result.path;
+            try { localStorage.setItem('idlr_savepath', _savedPath); } catch (error) { console.warn('Could not save folder locally', error); }
+            updatePathDisplay();
+            const saved = await savePrefs();
+            closePathDialog();
+            toast(saved
+                ? 'Save folder updated ✓ — files go to ' + _savedPath
+                : 'Folder selected, but account preferences could not be saved. This choice is kept on this device.',
+            saved ? 'ok' : 'err');
+        }
+
+        async function savePathFromInput() {
+            const input = document.getElementById('path-input');
+            const error = document.getElementById('path-err');
+            const button = document.getElementById('path-save-btn');
+            if (!input || !error || !button) return;
+            button.disabled = true;
+            error.textContent = '';
+            error.style.display = 'none';
+            try {
+                await saveSelectedPath(input.value.trim());
+            } catch (exception) {
+                error.textContent = exception.message || 'Could not use that folder.';
+                error.style.display = 'block';
+            } finally {
+                button.disabled = false;
+            }
+        }
+
+        async function changePath() {
+            if (window.__TAURI__?.core?.invoke) {
+                try {
+                    const selected = await window.__TAURI__.core.invoke('select_folder', {
+                        currentPath: currentSavePath()
+                    });
+                    if (selected) await saveSelectedPath(selected);
+                } catch (error) {
+                    toast(error.message || 'Could not open the folder picker.', 'err');
+                }
+                return;
+            }
+            if (window.__TAURI__?.core?.invoke) {
+                try {
+                    const selected = await window.__TAURI__.core.invoke('select_folder', {
+                        currentPath: currentSavePath()
+                    });
+                    if (selected) await saveSelectedPath(selected);
+                } catch (error) {
+                    toast(error.message || 'Could not open the folder picker.', 'err');
+                }
+                return;
+            }
+            if (window.pywebview?.api?.select_folder) {
+                try {
+                    const selected = await window.pywebview.api.select_folder(currentSavePath());
+                    if (selected?.path) await saveSelectedPath(selected.path);
+                } catch (error) {
+                    toast(error.message || 'Could not open the folder picker.', 'err');
+                }
+                return;
+            }
+            openPathDialog();
+        }
+
+        /* ══ COPY IDLR URL ══ */
         function copyNetworkUrl(event) {
             const el = document.getElementById('sp-network');
             if (!el) return;
             const url = el.textContent.trim();
-            if (!url || url === 'localhost:5000') {
-                toast('No network URL available', 'err');
+            if (!url || url === 'Unavailable') {
+                toast('IDLR URL is unavailable while the app is closed.', 'err');
                 return;
             }
             navigator.clipboard.writeText(url).then(() => {
-                toast('Network URL copied ✓', 'ok');
+                toast('IDLR URL copied ✓', 'ok');
             }).catch(() => {
                 const ta = document.createElement('textarea');
                 ta.value = url;
@@ -4599,15 +5651,84 @@
                 ta.select();
                 document.execCommand('copy');
                 ta.remove();
-                toast('Network URL copied ✓', 'ok');
+                toast('IDLR URL copied ✓', 'ok');
             });
             event?.stopPropagation();
         }
 
         /* ══ DOWNLOAD ══ */
-        function doPaste() {
-            navigator.clipboard.readText().then(t => { document.getElementById('url-inp').value = t.trim();
-                detectURL(t.trim()); }).catch(() => toast('Clipboard not available', 'err'));
+        function finishDownload(p) {
+            if (_es) {
+                _es.close();
+                _es = null;
+            }
+            _activeJobId = '';
+            _busy = false;
+            document.getElementById('dl-btn').disabled = false;
+            document.getElementById('prog-fill').classList.remove('active');
+            const siteIcon = document.getElementById('site-icon');
+            if (siteIcon) siteIcon.className = 'site-icon detected';
+            if (p.status === 'done') {
+                setProg(100);
+                setStat('✓ Download complete!', 'green');
+                document.getElementById('now-status').textContent = 'Saved ✓';
+                toast('Download complete! ✓', 'ok');
+                const title = p.title || 'Download';
+                if ((typeof _settingsState === 'undefined') || _settingsState.dlNotif !== false)
+                    addNotification(`Download complete: ${title}`, 'success');
+            } else {
+                setStat('Failed: ' + (p.error || 'Unknown'), 'red');
+                document.getElementById('now-status').textContent = 'Failed ✗';
+                toast('Download failed: ' + (p.error || 'Unknown'), 'err');
+                if ((typeof _settingsState === 'undefined') || _settingsState.dlNotif !== false)
+                    addNotification(`Download failed: ${p.error || 'Unknown error'}`, 'update');
+            }
+        }
+
+        function applyDownloadProgress(p) {
+            if (p.title) document.getElementById('now-title').textContent = p.title;
+            if (p.thumb) setThumb(p.thumb);
+            if (p.logs) {
+                p.logs.forEach(line => addLog(line.t, line.c === 'ok' ? 'ok' : line.c === 'err' ? 'err' : 'dim'));
+                _jobLogsSeen += p.logs.length;
+            }
+            if (p.status === 'downloading') {
+                const progress = Number(p.progress) || 0;
+                setProg(progress);
+                setStat(`Downloading  ${progress.toFixed(1)}%`, 'yellow');
+                document.getElementById('stat-spd2').textContent = (p.speed || '') + (p.eta ? ' · ETA ' + p.eta : '');
+                document.getElementById('prog-spd').textContent = p.speed || '';
+                document.getElementById('prog-eta').textContent = p.eta ? 'ETA ' + p.eta : '';
+                document.getElementById('now-status').textContent = `${progress.toFixed(1)}%  ${p.speed || ''}`;
+            } else if (p.status === 'merging') {
+                setStat('Merging video + audio…', 'yellow');
+            }
+            if (p.done) finishDownload(p);
+        }
+
+        async function pollDownloadProgress(jobId) {
+            let failures = 0;
+            while (_busy && _activeJobId === jobId) {
+                try {
+                    const response = await fetch(`/api/progress-state/${encodeURIComponent(jobId)}?since=${_jobLogsSeen}`, {
+                        cache: 'no-store'
+                    });
+                    const data = await response.json();
+                    if (!response.ok) throw new Error(data.error || `Progress request failed (${response.status})`);
+                    failures = 0;
+                    applyDownloadProgress(data);
+                    _jobLogsSeen = Math.max(_jobLogsSeen, Number(data.log_count) || 0);
+                    if (data.done) return;
+                } catch (error) {
+                    failures++;
+                    setStat('Reconnecting to download…', 'yellow');
+                    if (failures >= 12) {
+                        finishDownload({ status: 'error', error: 'Lost connection to the download progress service.' });
+                        return;
+                    }
+                }
+                await new Promise(resolve => setTimeout(resolve, 700));
+            }
         }
 
         async function go() {
@@ -4627,68 +5748,36 @@
             const si = document.getElementById('site-icon');
             if (si) si.className = 'site-icon downloading';
             addLog('► ' + url, 'dim');
-            const r = await fetch('/api/download', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ url, mode: _dd.mode, quality: _dd.quality, format: _dd.format, path: _savedPath ||
-                        '', user: U?.email || '',
-                    thumb: (typeof _settingsState === 'undefined') ? true : _settingsState.autoThumb !== false,
-                    playlist_all: (typeof _settingsState !== 'undefined') && _settingsState.playlistAll === true })
-            });
-            const d = await r.json();
-            if (!r.ok) { setStat('Error: ' + d.error, 'red');
-                _busy = false;
-                document.getElementById('dl-btn').disabled = false; const si = document.getElementById('site-icon'); if (si)
-                    si.className = 'site-icon'; return; }
-            if (_es) { _es.close();
-                _es = null; }
-            _es = new EventSource('/api/progress/' + d.job_id);
-            _es.onmessage = e => {
-                const p = JSON.parse(e.data);
-                if (p.title) document.getElementById('now-title').textContent = p.title;
-                if (p.thumb) setThumb(p.thumb);
-                if (p.logs) p.logs.forEach(l => addLog(l.t, l.c === 'ok' ? 'ok' : l.c === 'err' ? 'err' : 'dim'));
-                if (p.status === 'downloading') { setProg(p.progress);
-                    setStat(`Downloading  ${p.progress.toFixed(1)}%`, 'yellow');
-                    document.getElementById('stat-spd2').textContent = (p.speed || '') + (p.eta ? ' · ETA ' + p.eta : '');
-                    document.getElementById('prog-spd').textContent = p.speed || '';
-                    document.getElementById('prog-eta').textContent = p.eta ? 'ETA ' + p.eta : '';
-                    document.getElementById('now-status').textContent = `${p.progress.toFixed(1)}%  ${p.speed||''}`; } else if (
-                    p.status === 'merging') { setStat('Merging video + audio…', 'yellow'); }
-                if (p.done) {
-                    _es.close();
-                    _es = null;
-                    _busy = false;
-                    document.getElementById('dl-btn').disabled = false;
-                    document.getElementById('prog-fill').classList.remove('active');
-                    const si = document.getElementById('site-icon');
-                    if (si) si.className = 'site-icon detected';
-                    if (p.status === 'done') {
-                        setProg(100);
-                        setStat('✓ Download complete!', 'green');
-                        document.getElementById('now-status').textContent = 'Saved ✓';
-                        toast('Download complete! ✓', 'ok');
-                        const title = p.title || 'Download';
-                        if ((typeof _settingsState === 'undefined') || _settingsState.dlNotif !== false)
-                            addNotification(`Download complete: ${title}`, 'success');
-                    } else {
-                        setStat('Failed: ' + (p.error || 'Unknown'), 'red');
-                        document.getElementById('now-status').textContent = 'Failed ✗';
-                        toast('Download failed', 'err');
-                        if ((typeof _settingsState === 'undefined') || _settingsState.dlNotif !== false)
-                            addNotification(`Download failed: ${p.error || 'Unknown error'}`, 'update');
-                    }
-                }
-            };
-            _es.onerror = () => { if (_es) { _es.close();
-                    _es = null; }
+            try {
+                const response = await fetch('/api/download', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        url, mode: _dd.mode, quality: _dd.quality, format: _dd.format,
+                        path: _savedPath || '', user: U?.email || '',
+                        thumb: (typeof _settingsState === 'undefined') ? true : _settingsState.autoThumb !== false,
+                        playlist_all: (typeof _settingsState !== 'undefined') && _settingsState.playlistAll === true
+                    })
+                });
+                const data = await response.json();
+                if (!response.ok) throw new Error(data.error || `Download request failed (${response.status}).`);
+                _activeJobId = data.job_id;
+                _jobLogsSeen = 0;
+                if (_es) _es.close();
+                _es = null;
+                pollDownloadProgress(data.job_id);
+            } catch (error) {
+                _activeJobId = '';
                 _busy = false;
                 document.getElementById('dl-btn').disabled = false;
-                setStat('Connection lost. Try again.', 'red');
-                const si = document.getElementById('site-icon'); if (si) si.className = 'site-icon'; };
+                if (si) si.className = 'site-icon';
+                setStat(error.message || 'Could not reach the IDLR server.', 'red');
+                toast(error.message || 'Could not reach the IDLR server.', 'err');
+            }
         }
 
         function cancelDl() {
+            _activeJobId = '';
             if (_es) { _es.close();
                 _es = null; }
             _busy = false;
@@ -4703,9 +5792,51 @@
             toast('Cancelled', '');
         }
 
-        /* ══ HISTORY with search & rename ══ */
-        let _filteredItems = [];
+        /* ══ THUMBNAIL-ONLY DOWNLOAD ══ */
+        let _thumbBusy = false;
+        async function dlThumb() {
+            if (_thumbBusy || _busy) { toast('A download is already running', 'err'); return; }
+            const url = (document.getElementById('url-inp').value || '').trim();
+            if (!url) { toast('Paste a URL first!', 'err'); return; }
+            _thumbBusy = true;
+            const btn = document.getElementById('thumb-btn');
+            if (btn) { btn.disabled = true; btn.textContent = '⏳ Fetching…'; }
+            document.getElementById('now-card')?.classList.add('show');
+            setStat('Fetching cover art…', 'yellow');
+            addLog('🖼 Thumbnail: ' + url, 'dim');
+            try {
+                const r = await fetch('/api/thumbnail', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ url, path: _savedPath || '', user: U?.email || '' })
+                });
+                const d = await r.json();
+                if (r.ok && d.ok) {
+                    if (d.thumb) setThumb(d.thumb);
+                    const nt = document.getElementById('now-title');
+                    if (nt && d.title) nt.textContent = d.title;
+                    const ns = document.getElementById('now-status');
+                    if (ns) ns.textContent = 'Cover saved ✓';
+                    setStat('✓ Cover saved: ' + (d.file || ''), 'green');
+                    addLog('✓ Saved ' + (d.file || 'cover'), 'ok');
+                    toast('Thumbnail saved ✓', 'ok');
+                    if ((typeof _settingsState === 'undefined') || _settingsState.dlNotif !== false)
+                        addNotification(`Thumbnail saved: ${d.title || d.file || 'cover'}`, 'success');
+                } else {
+                    setStat('Failed: ' + (d.error || 'Unknown'), 'red');
+                    addLog('✗ ' + (d.error || 'Unknown'), 'err');
+                    toast('Thumbnail failed', 'err');
+                }
+            } catch (e) {
+                setStat('Connection lost. Try again.', 'red');
+                toast('Cannot reach server — is app.py running?', 'err');
+            } finally {
+                _thumbBusy = false;
+                if (btn) { btn.disabled = false; btn.textContent = '🖼 Thumbnail'; }
+            }
+        }
 
+        /* ══ HISTORY with search & rename ══ */
         function filterHistory() {
             const input = document.getElementById('hist-search');
             const clearBtn = document.getElementById('clear-search-btn');
@@ -4730,12 +5861,67 @@
         }
 
         function getFilteredItems() {
-            if (!_searchQuery) return _histItems;
-            return _histItems.filter(item => {
+            let items = tabItems();
+            if (!_searchQuery) return items;
+            return items.filter(item => {
                 const title = (item.title || '').toLowerCase();
                 const url = (item.url || '').toLowerCase();
                 return title.includes(_searchQuery) || url.includes(_searchQuery);
             });
+        }
+
+        /* ── history tabs: Files / Favorites / Recent / Trash ── */
+        let _histTab = 'files';
+
+        function isTrashed(item) { return !!item.trashed; }
+
+        function isRecentItem(item) {
+            try {
+                const m = String(item.date || '').match(/(\d{4})-(\d{2})-(\d{2})/);
+                if (!m) return false;
+                const d = new Date(+m[1], +m[2] - 1, +m[3]);
+                if (isNaN(d.getTime())) return false;
+                return (Date.now() - d.getTime()) < 7 * 24 * 3600 * 1000;
+            } catch (e) { return false; }
+        }
+
+        function tabItems() {
+            if (_histTab === 'fav') return _histItems.filter(i => !isTrashed(i) && i.starred);
+            if (_histTab === 'recent') return _histItems.filter(i => !isTrashed(i) && isRecentItem(i));
+            if (_histTab === 'trash') return _histItems.filter(i => isTrashed(i));
+            return _histItems.filter(i => !isTrashed(i));
+        }
+
+        function updateHistCounts() {
+            const set = (id, n) => { const el = document.getElementById(id); if (el) el.textContent = n ? String(n) : ''; };
+            set('cnt-files', _histItems.filter(i => !isTrashed(i)).length);
+            set('cnt-fav', _histItems.filter(i => !isTrashed(i) && i.starred).length);
+            set('cnt-recent', _histItems.filter(i => !isTrashed(i) && isRecentItem(i)).length);
+            set('cnt-trash', _histItems.filter(i => isTrashed(i)).length);
+        }
+
+        function setHistTab(t) {
+            _histTab = t;
+            _selected.clear();
+            _selectModeOn = false;
+            document.querySelectorAll('.hist-tab').forEach(b =>
+                {
+                    const active = b.dataset.htab === t;
+                    b.classList.toggle('active', active);
+                    b.setAttribute('aria-selected', String(active));
+                });
+            const inTrash = t === 'trash';
+            const show = (id, v) => { const el = document.getElementById(id); if (el) el.style.display = v ? '' : 'none'; };
+            show('select-toggle-btn', !inTrash);
+            show('clear-all-btn', !inTrash);
+            show('trash-restore-btn', inTrash);
+            show('trash-empty-btn', inTrash);
+            const bar = document.getElementById('hist-bulk-bar');
+            if (bar) bar.className = 'hist-bulk-bar';
+            const sbtn = document.getElementById('select-toggle-btn');
+            if (sbtn) sbtn.textContent = '☑ Select';
+            updateBulkCount();
+            renderHistItems();
         }
 
         let _selectModeOn = false;
@@ -4770,7 +5956,7 @@
         async function bulkDelete() {
             if (!_selected.size) { toast('Select items first', 'err'); return; }
             const needConfirm = (typeof _settingsState === 'undefined') ? true : _settingsState.confirmClear !== false;
-            if (needConfirm && !confirm(`Delete ${_selected.size} item(s) from history?`)) return;
+            if (needConfirm && !confirm(`Move ${_selected.size} item(s) to Trash? You can restore them later.`)) return;
             for (const url of _selected) {
                 await fetch('/api/history/remove', { method: 'DELETE', headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ user: U.email, url }) });
@@ -4780,7 +5966,7 @@
             _selectModeOn = false;
             document.getElementById('hist-bulk-bar').className = 'hist-bulk-bar';
             document.getElementById('select-toggle-btn').textContent = '☑ Select';
-            toast(`Deleted ${count} item(s)`, 'ok');
+            toast(`Moved ${count} item(s) to Trash 🗑`, 'ok');
             loadHist();
         }
 
@@ -4840,10 +6026,20 @@
         function renderHistItems() {
             const el = document.getElementById('hist-list');
             if (!el) return;
+            updateHistCounts();
             const items = getFilteredItems();
+            const inTrash = _histTab === 'trash';
             if (!items.length) {
+                const emptyFor = {
+                    files: ['📥', 'No downloads yet.<br>Start downloading to see history here.'],
+                    fav: ['★', 'No favorites yet.<br>Tap the ★ on any download to pin it here.'],
+                    recent: ['🕘', 'Nothing in the last 7 days.<br>New downloads will show up here.'],
+                    trash: ['🗑', 'Trash is empty.<br>Deleted items land here and can be restored.'],
+                }[inTrash ? 'trash' : _histTab] || ['🔍', 'No results found.<br>Try a different search.'];
+                const ico = _searchQuery ? '🔍' : emptyFor[0];
+                const txt = _searchQuery ? 'No results found.<br>Try a different search.' : emptyFor[1];
                 el.innerHTML =
-                    `<div class="empty-state"><div class="empty-ico">🔍</div><p>${_searchQuery ? 'No results found.' : 'No downloads yet.'}<br>${_searchQuery ? 'Try a different search.' : 'Start downloading to see history here.'}</p></div>`;
+                    `<div class="empty-state"><div class="empty-ico">${ico}</div><p>${txt}</p></div>`;
                 return;
             }
             el.innerHTML = '';
@@ -4876,9 +6072,13 @@
                 <div class="hist-meta">${metaHtml}</div>
               </div>
               <div class="hist-btns">
-                <button class="hbtn rename" onclick="renameHist(decodeURIComponent('${su}'))">📝</button>
-                <button class="hbtn" onclick="redl(decodeURIComponent('${su}'))">↺</button>
-                <button class="hbtn del" onclick="removeHist(decodeURIComponent('${su}'),this)">🗑</button>
+                ${inTrash
+                    ? `<button class="hbtn rename" onclick="restoreHist(decodeURIComponent('${su}'))" title="Restore">↩</button>
+                       <button class="hbtn del" onclick="deleteForeverHist(decodeURIComponent('${su}'),this)" title="Delete forever">✖</button>`
+                    : `<button class="hbtn star${item.starred ? ' lit' : ''}" onclick="toggleStar(decodeURIComponent('${su}'))" title="Favorite">★</button>
+                       <button class="hbtn rename" onclick="renameHist(decodeURIComponent('${su}'))">📝</button>
+                       <button class="hbtn" onclick="redl(decodeURIComponent('${su}'))">↺</button>
+                       <button class="hbtn del" onclick="removeHist(decodeURIComponent('${su}'),this)">🗑</button>`}
               </div>`;
                 el.appendChild(row);
             });
@@ -4906,6 +6106,7 @@
             btn.textContent = '…';
             await fetch('/api/history/remove', { method: 'DELETE', headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ user: U.email, url }) });
+            toast('Moved to Trash 🗑 — restore it from the Trash tab', 'ok');
             const row = btn.closest('.hist-item');
             if (row) { row.style.transition = 'opacity .25s,transform .25s';
                 row.style.opacity = '0';
@@ -4915,12 +6116,68 @@
 
         async function clearHist() {
             const needConfirm = (typeof _settingsState === 'undefined') ? true : _settingsState.confirmClear !== false;
-            if (needConfirm && !confirm('Delete all your download history?')) return;
+            if (needConfirm && !confirm('Move all your history to Trash? You can restore it from the Trash tab.')) return;
             await fetch('/api/history/clear?user=' + encodeURIComponent(U.email), { method: 'DELETE' });
             _histItems = [];
             _selected.clear();
             renderHistItems();
-            toast('History cleared', 'ok');
+            toast('Moved everything to Trash 🗑', 'ok');
+        }
+
+        /* ── Favorites + Trash actions ── */
+        async function toggleStar(url) {
+            try {
+                const r = await fetch('/api/history/star', { method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ user: U.email, url }) });
+                const d = await r.json();
+                toast(d.starred ? 'Added to Favorites ★' : 'Removed from Favorites', 'ok');
+                loadHist();
+            } catch (e) { toast('Network error', 'err'); }
+        }
+
+        async function restoreHist(url) {
+            try {
+                await fetch('/api/history/restore', { method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ user: U.email, url }) });
+                toast('Restored ✓', 'ok');
+                loadHist();
+            } catch (e) { toast('Network error', 'err'); }
+        }
+
+        async function deleteForeverHist(url, btn) {
+            const needConfirm = (typeof _settingsState === 'undefined') ? true : _settingsState.confirmClear !== false;
+            if (needConfirm && !confirm('Delete this forever? This cannot be undone.')) return;
+            if (btn) { btn.disabled = true; btn.textContent = '…'; }
+            try {
+                await fetch('/api/history/delete', { method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ user: U.email, url }) });
+                toast('Deleted forever', 'ok');
+                loadHist();
+            } catch (e) { toast('Network error', 'err'); }
+        }
+
+        async function emptyTrash() {
+            const trashed = _histItems.filter(i => isTrashed(i));
+            if (!trashed.length) { toast('Trash is already empty', ''); return; }
+            if (!confirm(`Permanently delete ${trashed.length} trashed item(s)? This cannot be undone.`)) return;
+            await fetch('/api/history/empty-trash?user=' + encodeURIComponent(U.email), { method: 'DELETE' });
+            toast('Trash emptied', 'ok');
+            loadHist();
+        }
+
+        async function restoreAllTrash() {
+            const trashed = _histItems.filter(i => isTrashed(i) && i.url);
+            if (!trashed.length) { toast('Trash is already empty', ''); return; }
+            for (const item of trashed) {
+                await fetch('/api/history/restore', { method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ user: U.email, url: item.url }) });
+            }
+            toast(`Restored ${trashed.length} item(s) ✓`, 'ok');
+            loadHist();
         }
 
         /* ══ LOAD INFO ══ */
@@ -4928,11 +6185,35 @@
             try {
                 const r = await fetch('/api/info');
                 const d = await r.json();
+                _updaterInfo = d;
+                configureAppUpdateRow(d);
+                const updateTitle = document.getElementById('sp-update-title');
+                const updateSub = document.getElementById('sp-update-sub');
+                if (updateTitle && updateSub) {
+                    if (d.pending_ytdlp_update) {
+                        updateTitle.textContent = 'Restart to finish update';
+                        updateSub.textContent = `yt-dlp v${d.pending_ytdlp_update} is ready`;
+                    } else {
+                        updateTitle.textContent = d.frozen ? 'Update yt-dlp' : 'Update yt-dlp + spotdl';
+                        updateSub.textContent = d.frozen
+                            ? 'Install the verified latest version; restart to apply'
+                            : 'Update both download engines';
+                    }
+                }
                 const yv = document.getElementById('sp-ytdlp');
                 if (yv) yv.textContent = 'v' + d.ytdlp;
                 const nu = document.getElementById('sp-network');
+                const networkTitle = document.getElementById('sp-network-title');
+                const networkSub = document.getElementById('sp-network-sub');
+                const networkLabel = document.getElementById('info-network-label');
+                const browserMode = Boolean(d.frozen);
+                if (networkTitle) networkTitle.textContent = browserMode ? 'Browser URL' : 'Network URL';
+                if (networkSub) networkSub.textContent = browserMode
+                    ? 'Open on this PC while IDLR is running'
+                    : 'Share on your network';
+                if (networkLabel) networkLabel.textContent = browserMode ? 'Browser URL' : 'Network URL';
                 if (nu) {
-                    const url = (d.network && !d.network.includes('localhost')) ? d.network : 'localhost:5000';
+                    const url = d.network || (browserMode ? 'Unavailable' : 'localhost:5000');
                     nu.textContent = url;
                 }
                 const fb = document.getElementById('sp-ffmpeg');
@@ -4943,9 +6224,14 @@
                 const im = document.getElementById('info-ffmpeg');
                 if (im) im.textContent = d.ffmpeg ? '✓ Yes' : '✗ No';
                 const inet = document.getElementById('info-network');
-                if (inet) inet.textContent = (d.network || 'localhost:5000').replace('http://', '');
+                if (inet) inet.textContent = d.network || (browserMode ? 'Unavailable' : 'localhost:5000');
                 const isp = document.getElementById('info-savepath');
-                if (isp) isp.textContent = (_savedPath || DPATH || '~/Downloads');
+                if (isp) isp.textContent = currentSavePath();
+                if (d.default_path) {
+                    _serverDefaultPath = d.default_path;
+                    try { updatePathDisplay(); } catch (e) {}
+                    if (isp) isp.textContent = currentSavePath();
+                }
                 if (d.version) {
                     const iv = document.getElementById('info-ver');
                     if (iv) iv.textContent = 'v' + d.version;
@@ -4954,6 +6240,156 @@
         }
 
         /* ══ PROFILE ══ */
+        function setProfilePreview(target, data) {
+            if (target === 'avatar') {
+                const avatar = document.getElementById('prof-av-circle');
+                if (!avatar) return;
+                avatar.replaceChildren();
+                if (data) {
+                    const image = document.createElement('img');
+                    image.src = data;
+                    image.alt = 'Profile picture';
+                    avatar.appendChild(image);
+                } else {
+                    const initial = document.createElement('span');
+                    initial.textContent = (U?.name || U?.email || '?')[0].toUpperCase();
+                    avatar.appendChild(initial);
+                }
+                return;
+            }
+            const banner = document.getElementById('prof-banner-img');
+            if (banner) {
+                banner.src = data || '';
+                banner.style.display = data ? 'block' : 'none';
+            }
+        }
+
+        function setImageTarget(target) {
+            _imageTarget = target === 'banner' ? 'banner' : 'avatar';
+            document.querySelectorAll('[data-prof-target]').forEach(button =>
+                button.classList.toggle('active', button.dataset.profTarget === _imageTarget));
+            renderProfileImageHistory();
+        }
+
+        function openImageStudio(target) {
+            const studio = document.getElementById('prof-image-studio');
+            if (!studio) return;
+            studio.hidden = false;
+            setImageTarget(target);
+            studio.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+        }
+
+        function renderProfileImageHistory() {
+            const gallery = document.getElementById('prof-image-gallery');
+            if (!gallery) return;
+            gallery.replaceChildren();
+            if (!_profileImages.length) {
+                const empty = document.createElement('div');
+                empty.className = 'prof-gallery-empty';
+                empty.textContent = 'Your image library is empty. Add an image to get started.';
+                gallery.appendChild(empty);
+                return;
+            }
+            _profileImages.forEach((item, index) => {
+                const card = document.createElement('div');
+                card.className = 'prof-gallery-card';
+                const choose = document.createElement('button');
+                choose.type = 'button';
+                choose.className = 'prof-gallery-item' +
+                    (_profileDraft[_imageTarget] === item.data ? ' selected' : '');
+                choose.title = `Added ${item.added || 'recently'} — use as ${_imageTarget}`;
+                const image = document.createElement('img');
+                image.src = item.data;
+                image.alt = `Saved image ${index + 1}`;
+                choose.appendChild(image);
+                const date = document.createElement('span');
+                date.className = 'prof-gallery-date';
+                date.textContent = item.added || 'Saved';
+                choose.appendChild(date);
+                choose.addEventListener('click', () => {
+                    _profileDraft[_imageTarget] = item.data;
+                    setProfilePreview(_imageTarget, item.data);
+                    renderProfileImageHistory();
+                });
+                const remove = document.createElement('button');
+                remove.type = 'button';
+                remove.className = 'prof-gallery-remove';
+                remove.textContent = '×';
+                remove.title = 'Remove from image library';
+                remove.setAttribute('aria-label', 'Remove saved image');
+                remove.addEventListener('click', event => {
+                    event.stopPropagation();
+                    _profileImages.splice(index, 1);
+                    renderProfileImageHistory();
+                });
+                card.append(choose, remove);
+                gallery.appendChild(card);
+            });
+        }
+
+        async function compressProfileImage(file) {
+            if (!file.type.match(/^image\/(png|jpeg|webp)$/))
+                throw new Error('Choose a PNG, JPEG, or WebP image.');
+            if (file.size > 15 * 1024 * 1024)
+                throw new Error('Choose an image smaller than 15 MB.');
+            const objectUrl = URL.createObjectURL(file);
+            try {
+                const image = new Image();
+                image.src = objectUrl;
+                await new Promise((resolve, reject) => {
+                    image.onload = resolve;
+                    image.onerror = () => reject(new Error('That image could not be opened.'));
+                });
+                let scale = Math.min(1, 720 / Math.max(image.naturalWidth, image.naturalHeight));
+                const canvas = document.createElement('canvas');
+                const context = canvas.getContext('2d');
+                if (!context) throw new Error('Your browser could not prepare this image.');
+                let blob = null;
+                for (let attempt = 0; attempt < 6; attempt++) {
+                    canvas.width = Math.max(1, Math.round(image.naturalWidth * scale));
+                    canvas.height = Math.max(1, Math.round(image.naturalHeight * scale));
+                    context.fillStyle = '#151515';
+                    context.fillRect(0, 0, canvas.width, canvas.height);
+                    context.drawImage(image, 0, 0, canvas.width, canvas.height);
+                    blob = await new Promise(resolve => canvas.toBlob(resolve, 'image/jpeg', 0.82 - attempt * 0.06));
+                    if (blob && blob.size <= 180 * 1024) break;
+                    scale *= 0.78;
+                }
+                if (!blob || blob.size > 250 * 1024)
+                    throw new Error('This image could not be compressed small enough.');
+                return await new Promise((resolve, reject) => {
+                    const reader = new FileReader();
+                    reader.onload = () => resolve(reader.result);
+                    reader.onerror = () => reject(new Error('Could not read the compressed image.'));
+                    reader.readAsDataURL(blob);
+                });
+            } finally {
+                URL.revokeObjectURL(objectUrl);
+            }
+        }
+
+        async function uploadProfileImage(input) {
+            const file = input.files?.[0];
+            input.value = '';
+            if (!file) return;
+            if (_profileImages.length >= 12) {
+                toast('Image library is full. Remove an old image before adding another.', 'err');
+                return;
+            }
+            try {
+                const data = await compressProfileImage(file);
+                const added = new Date().toISOString().slice(0, 16).replace('T', ' ');
+                const item = { id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`, data, added };
+                _profileImages.push(item);
+                _profileDraft[_imageTarget] = data;
+                setProfilePreview(_imageTarget, data);
+                renderProfileImageHistory();
+                toast('Image added to your library — save your profile to keep it.', 'ok');
+            } catch (error) {
+                toast(error.message || 'Could not add that image.', 'err');
+            }
+        }
+
         function openProfModal() {
             if (!U) return;
             document.getElementById('prof-modal').style.display = 'flex';
@@ -4966,25 +6402,29 @@
             document.getElementById('edit-bio').value = U.bio || '';
             document.getElementById('prof-joined').textContent = U.joined || '—';
             document.getElementById('prof-err').textContent = '';
-            const av = document.getElementById('prof-av-circle');
-            if (av) av.innerHTML = U.avatar ? `<img src="${U.avatar}"/>` : `<span id="prof-av-init">${U.name[0].toUpperCase()}</span>`;
+            _profileDraft = { avatar: U.avatar || '', banner: U.banner || '' };
+            _profileImages = [];
+            const studio = document.getElementById('prof-image-studio');
+            if (studio) studio.hidden = true;
+            setProfilePreview('avatar', _profileDraft.avatar);
+            setProfilePreview('banner', _profileDraft.banner);
+            renderProfileImageHistory();
+            fetch('/api/profile/images?user=' + encodeURIComponent(U.email)).then(async response => {
+                const data = await response.json();
+                if (!response.ok) throw new Error(data.error || 'Could not load image library.');
+                _profileImages = Array.isArray(data.images) ? data.images : [];
+                renderProfileImageHistory();
+            }).catch(error => {
+                const err = document.getElementById('prof-err');
+                if (err) {
+                    err.textContent = error.message;
+                    err.style.display = 'block';
+                }
+            });
             fetch('/api/history?user=' + encodeURIComponent(U.email)).then(r => r.json()).then(items => {
                 const el = document.getElementById('prof-dl-count');
-                if (el) el.textContent = items.length;
+                if (el) el.textContent = items.filter(i => !i.trashed).length;
             }).catch(() => {});
-        }
-
-        function uploadAvatar(input) {
-            const file = input.files[0];
-            if (!file) return;
-            const reader = new FileReader();
-            reader.onload = e => {
-                const data = e.target.result;
-                const av = document.getElementById('prof-av-circle');
-                if (av) av.innerHTML = `<img src="${data}"/>`;
-                U._pendingAvatar = data;
-            };
-            reader.readAsDataURL(file);
         }
 
         async function saveProfile() {
@@ -4994,23 +6434,39 @@
             err.textContent = '';
             if (!name) { err.textContent = 'Name cannot be empty';
                 err.style.display = 'block'; return; }
-            const body = { user: U.email, name, bio };
-            if (U._pendingAvatar) body.avatar = U._pendingAvatar;
-            const r = await fetch('/api/profile', { method: 'POST', headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(body) });
-            const d = await r.json();
-            if (!r.ok) { err.textContent = d.error || 'Failed';
-                err.style.display = 'block'; return; }
-            U = Object.assign(U, d);
-            delete U._pendingAvatar;
-            // Save session only if the toggle is ON
-            const wantSave = (typeof _settingsState === 'undefined') ? true : _settingsState.saveLogins !== false;
-            if (wantSave) {
-                try { localStorage.setItem('idlr_u', JSON.stringify(U)); } catch (e) {}
+            const body = {
+                user: U.email,
+                name,
+                bio,
+                avatar: _profileDraft.avatar,
+                banner: _profileDraft.banner,
+                image_history: _profileImages
+            };
+            try {
+                const response = await fetch('/api/profile', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(body)
+                });
+                const data = await response.json();
+                if (!response.ok) {
+                    err.textContent = data.error || 'Profile could not be saved.';
+                    err.style.display = 'block';
+                    return;
+                }
+                U = Object.assign(U, data);
+                _profileImages = body.image_history;
+                const wantSave = (typeof _settingsState === 'undefined') ? true : _settingsState.saveLogins !== false;
+                if (wantSave) {
+                    try { localStorage.setItem('idlr_u', JSON.stringify(U)); } catch (e) {}
+                }
+                fillUserUI();
+                closeProfModal();
+                toast('Profile updated! ✓', 'ok');
+            } catch (error) {
+                err.textContent = error.message || 'Could not reach the IDLR server.';
+                err.style.display = 'block';
             }
-            fillUserUI();
-            closeProfModal();
-            toast('Profile updated! ✓', 'ok');
         }
 
         /* ══ RATE ══ */
@@ -5233,45 +6689,142 @@
         }
 
         /* ══ UPDATE FROM SETTINGS PANEL ══ */
+        function configureAppUpdateRow(info) {
+            const row = document.getElementById('app-update-row');
+            const sub = document.getElementById('app-update-sub');
+            if (!row) return;
+            const canUpdate = Boolean(window.__TAURI__?.core?.invoke || info?.network);
+            row.classList.toggle('app-update-disabled', !canUpdate);
+            row.setAttribute('aria-disabled', String(!canUpdate));
+            row.title = canUpdate
+                ? 'Check for signed IDLR desktop updates'
+                : 'App updates are available in the installed desktop app.';
+            if (!canUpdate && sub) {
+                sub.textContent = 'Available in the installed desktop app';
+            }
+        }
+
+        async function requestAppUpdate(action) {
+            if (window.__TAURI__?.core?.invoke) {
+                return window.__TAURI__.core.invoke(
+                    action === 'check' ? 'check_app_update' : 'install_app_update'
+                );
+            }
+            const response = await fetch('/api/app-update', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ action })
+            });
+            const data = await response.json();
+            if (!response.ok) {
+                throw new Error(data.error || `Update request failed (${response.status}).`);
+            }
+            return data;
+        }
+
+        let _appUpdateBusy = false;
+        async function checkAppUpdateFromPanel(row) {
+            if (_appUpdateBusy) return;
+            if (!window.__TAURI__?.core?.invoke && !_updaterInfo?.network) {
+                toast('IDLR app updates are available in the installed desktop app.', 'info');
+                return;
+            }
+
+            const title = document.getElementById('app-update-title');
+            const sub = document.getElementById('app-update-sub');
+            const right = row?.querySelector('.setting-row-right');
+            _appUpdateBusy = true;
+            if (row) row.style.pointerEvents = 'none';
+            if (title) title.textContent = 'Checking for updates…';
+            if (sub) sub.textContent = 'Checking the signed IDLR release feed';
+            if (right) right.textContent = '…';
+
+            try {
+                const update = await requestAppUpdate('check');
+                if (!update.available) {
+                    if (title) title.textContent = `IDLR is up to date · v${update.currentVersion}`;
+                    if (sub) sub.textContent = 'You have the latest desktop release';
+                    toast('IDLR is up to date.', 'ok');
+                    return;
+                }
+
+                if (title) title.textContent = `IDLR ${update.version} is available`;
+                if (sub) sub.textContent = update.notes || 'A signed desktop update is ready to install';
+                addNotification(`IDLR ${update.version} is available.`, 'update');
+                if (!confirm(`IDLR ${update.version} is available. Download and install it now?${update.notes ? `\n\n${update.notes}` : ''}`)) {
+                    return;
+                }
+
+                if (title) title.textContent = 'Downloading and installing…';
+                if (sub) sub.textContent = 'Keep IDLR open while the signed update is verified';
+                await requestAppUpdate('install');
+                if (title) title.textContent = 'Restarting IDLR…';
+                if (sub) sub.textContent = 'The update is installed; IDLR is restarting';
+                toast('IDLR update installed. Restarting…', 'ok');
+                addNotification(`IDLR ${update.version} was installed.`, 'success');
+            } catch (error) {
+                const message = error instanceof Error ? error.message : String(error);
+                if (title) title.textContent = 'Could not check for updates';
+                if (sub) sub.textContent = message;
+                toast(message, 'err');
+                addNotification(`IDLR app update failed: ${message}`, 'error');
+            } finally {
+                _appUpdateBusy = false;
+                if (row) row.style.pointerEvents = '';
+                if (right) right.textContent = '›';
+            }
+        }
+
         async function doUpdateFromPanel(row) {
             const title = document.getElementById('sp-update-title');
             const sub = document.getElementById('sp-update-sub');
             const rightEl = row ? row.querySelector('.setting-row-right') : null;
+            if (_updaterInfo?.pending_ytdlp_update) {
+                toast('Close and reopen IDLR to finish the yt-dlp update.', 'ok');
+                return;
+            }
             if (title) title.textContent = '⏳ Updating…';
-            if (sub) sub.textContent = 'Downloading latest versions…';
+            if (sub) sub.textContent = 'Checking and installing verified updates…';
             if (rightEl) rightEl.textContent = '';
             if (row) { row.style.opacity = '0.7';
                 row.style.pointerEvents = 'none'; }
             try {
                 const r = await fetch('/api/update-ytdlp', { method: 'POST' });
-                if (!r.ok) { throw new Error('Server error ' + r.status); }
                 const d = await r.json();
-                if (d.ok) {
-                    if (title) title.textContent = '✓ Updated!';
-                    if (sub) sub.textContent = d.msg || 'yt-dlp + spotdl are up to date';
+                if (r.ok && d.ok) {
+                    if (title) title.textContent = d.requires_restart ? '↻ Restart IDLR' : '✓ Up to date';
+                    if (sub) sub.textContent = d.msg || 'Downloader is already up to date.';
                     if (rightEl) rightEl.textContent = '✓';
-                    toast('Updated successfully! ✓', 'ok');
-                    addNotification('yt-dlp & spotdl updated successfully!', 'success');
+                    toast(d.msg || 'Update completed.', 'ok');
+                    addNotification(d.msg || 'Downloader update completed.', 'success');
                     loadInfo();
                 } else {
                     if (title) title.textContent = '⚠ Update failed';
                     if (sub) sub.textContent = d.msg || 'Try again later';
-                    toast('Update failed: ' + (d.msg || 'unknown error'), 'err');
-                    addNotification('Update failed: ' + (d.msg || 'unknown error'), 'update');
+                    toast(d.msg || 'Update failed. Try again later.', 'err');
+                    addNotification(d.msg || 'Update failed.', 'update');
                 }
-            } catch (e) {
+            } catch (error) {
                 if (title) title.textContent = '⚠ Server not responding';
-                if (sub) sub.textContent = 'Make sure app.py is running';
-                toast('Cannot reach server — is app.py running?', 'err');
-                addNotification('Cannot reach server for update.', 'update');
+                if (sub) sub.textContent = 'Could not contact IDLR. Check that the app is still open.';
+                toast('Could not contact the IDLR update service.', 'err');
+                addNotification('Could not contact the IDLR update service.', 'update');
             } finally {
                 if (row) { row.style.opacity = '1';
                     row.style.pointerEvents = ''; }
                 setTimeout(() => {
-                    if (title && title.textContent !== 'Update yt-dlp + spotdl')
-                        title.textContent = 'Update yt-dlp + spotdl';
-                    if (sub && !sub.textContent.includes('latest'))
-                        sub.textContent = 'Keep downloaders at latest version';
+                    if (title && _updaterInfo) {
+                        title.textContent = _updaterInfo.pending_ytdlp_update
+                            ? 'Restart to finish update'
+                            : (_updaterInfo.frozen ? 'Update yt-dlp' : 'Update yt-dlp + spotdl');
+                    }
+                    if (sub && _updaterInfo) {
+                        sub.textContent = _updaterInfo.pending_ytdlp_update
+                            ? `yt-dlp v${_updaterInfo.pending_ytdlp_update} is ready`
+                            : (_updaterInfo.frozen
+                                ? 'Install the verified latest version; restart to apply'
+                                : 'Update both download engines');
+                    }
                     if (rightEl) rightEl.textContent = '›';
                 }, 5000);
             }
@@ -5283,6 +6836,13 @@
             overlay.classList.remove('hidden');
             overlay.style.display = 'flex';
 
+            document.querySelectorAll('button:not([title]), button[title=""], [role="tab"]:not([title]), [role="tab"][title=""]').forEach(button => {
+                const tooltip = button.querySelector('.tooltip')?.textContent?.trim();
+                const label = button.getAttribute('aria-label')?.trim()
+                    || tooltip
+                    || button.textContent.trim().replace(/\s+/g, ' ');
+                if (label) button.setAttribute('title', label.slice(0, 80));
+            });
             loadNotifications();
 
             document.getElementById('inp-pw')?.addEventListener('keydown', e => { if (e.key === 'Enter') doAuth(); });
@@ -5305,7 +6865,7 @@
                 let parsed = null;
                 try { parsed = JSON.parse(sv); } catch { localStorage.removeItem('idlr_u'); }
                 if (parsed) {
-                    try { launch(parsed); } catch (e) { console.warn('Session restore error:', e);
+                    try { launch(parsed, true); } catch (e) { console.warn('Session restore error:', e);
                         hideLoading(); }
                 } else {
                     hideLoading();

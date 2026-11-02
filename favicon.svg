@@ -1,20 +1,15 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256">
   <defs>
-    <linearGradient id="g1" x1="0%" y1="0%" x2="100%" y2="100%">
-      <stop offset="0%" stop-color="#ff2828"/>
-      <stop offset="100%" stop-color="#aa0000"/>
+    <linearGradient id="brand" x1="20" y1="12" x2="236" y2="244" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#ff625b"/>
+      <stop offset="1" stop-color="#c90f3c"/>
     </linearGradient>
-    <linearGradient id="g2" x1="0%" y1="0%" x2="0%" y2="100%">
-      <stop offset="0%" stop-color="#ffffff" stop-opacity="0.2"/>
-      <stop offset="100%" stop-color="#ffffff" stop-opacity="0"/>
+    <linearGradient id="shine" x1="128" y1="20" x2="128" y2="132" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#fff" stop-opacity=".16"/>
+      <stop offset="1" stop-color="#fff" stop-opacity="0"/>
     </linearGradient>
-    <filter id="s"><feDropShadow dx="0" dy="10" stdDeviation="18" flood-color="#000" flood-opacity="0.5"/></filter>
-    <filter id="ps"><feDropShadow dx="0" dy="3" stdDeviation="7" flood-color="#000" flood-opacity="0.3"/></filter>
-    <clipPath id="c"><rect width="256" height="256" rx="62" ry="62"/></clipPath>
   </defs>
-  <rect width="256" height="256" rx="62" ry="62" fill="url(#g1)" filter="url(#s)"/>
-  <rect width="256" height="256" rx="62" ry="62" fill="url(#g1)"/>
-  <rect width="256" height="128" rx="62" ry="62" fill="url(#g2)" clip-path="url(#c)"/>
-  <rect x="1" y="1" width="254" height="254" rx="61" ry="61" fill="none" stroke="rgba(255,255,255,0.13)" stroke-width="1.5"/>
-  <polygon points="96,68 96,188 192,128" fill="white" filter="url(#ps)"/>
+  <rect x="8" y="8" width="240" height="240" rx="68" fill="url(#brand)"/>
+  <path d="M8 76c0-37.6 30.4-68 68-68h104c37.6 0 68 30.4 68 68v24H8z" fill="url(#shine)"/>
+  <path d="M128 57v91m0 0 36-36m-36 36-36-36M77 190h102" fill="none" stroke="#fff" stroke-width="20" stroke-linecap="round" stroke-linejoin="round"/>
 </svg>

@@ -1,0 +1,104 @@
+name: Build IDLR App releases
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - "v*"
+
+jobs:
+  build:
+    name: Build (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, ubuntu-24.04, macos-14]
+    env:
+      TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+      TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install Linux desktop libraries
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential python3-dev pkg-config libcairo2-dev \
+            libgirepository-2.0-dev libgtk-3-dev libwebkit2gtk-4.1-dev \
+            gir1.2-gtk-3.0 gir1.2-webkit2-4.1
+
+      - name: Install Python dependencies
+        run: python -m pip install -r requirements-build.txt
+
+      - name: Install Linux desktop bindings
+        if: runner.os == 'Linux'
+        run: python -m pip install PyGObject
+
+      - name: Build desktop app
+        shell: bash
+        run: |
+          if [ -z "$TAURI_SIGNING_PRIVATE_KEY" ]; then
+            echo "::error::Add the TAURI_SIGNING_PRIVATE_KEY GitHub Actions secret before building signed app updates."
+            exit 1
+          fi
+          python build.py
+
+      - name: Record updater platform
+        shell: bash
+        run: printf '%s-%s\n' '${{ runner.os }}' '${{ runner.arch }}' > "src-tauri/target/release/bundle/target-${{ runner.os }}.txt"
+
+      - name: Upload native app bundles
+        uses: actions/upload-artifact@v4
+        with:
+          name: IDLR-App-${{ runner.os }}
+          path: src-tauri/target/release/bundle/**
+          if-no-files-found: error
+
+  publish:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - uses: actions/download-artifact@v4
+        with:
+          path: release-assets
+          merge-multiple: true
+
+      - name: Create signed updater manifest
+        run: >
+          python scripts/create_updater_manifest.py
+          --tag "${{ github.ref_name }}"
+          --repository "${{ github.repository }}"
+          --artifacts release-assets
+          --output release-assets/latest.json
+
+      - name: Create stable Windows installer download
+        shell: bash
+        run: |
+          installer="$(find release-assets -type f -name '*-setup.exe' -print -quit)"
+          test -n "$installer"
+          cp "$installer" release-assets/IDLR-App-Setup.exe
+
+      - name: Publish GitHub release
+        uses: softprops/action-gh-release@v3
+        with:
+          tag_name: ${{ github.ref_name }}
+          generate_release_notes: true
+          files: release-assets/**/*

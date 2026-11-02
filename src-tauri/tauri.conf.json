@@ -1,0 +1,57 @@
+{
+  "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
+  "productName": "IDLR App",
+  "version": "2.0.2",
+  "identifier": "com.idlr.desktop",
+  "build": {
+    "frontendDist": "../frontend-dist",
+    "beforeDevCommand": "npm run prepare:frontend",
+    "beforeBuildCommand": "npm run prepare:frontend"
+  },
+  "app": {
+    "windows": [
+      {
+        "title": "IDLR App — Internet Downloader",
+        "width": 1180,
+        "height": 820,
+        "minWidth": 800,
+        "minHeight": 600,
+        "resizable": true,
+        "fullscreen": false
+      }
+    ],
+    "withGlobalTauri": true,
+    "security": {
+      "csp": null
+    }
+  },
+  "plugins": {
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDAxMEM3RDBDQzg5OEQ0MDMKUldRRDFKaklESDBNQWNnbi93bFlhTjFyWEJzTUlCcEc3T2RwT1JxcWFsQTRTWlM0UHllNitmTEcK",
+      "endpoints": [
+        "https://github.com/Makerxm800/IDLR-App/releases/latest/download/latest.json"
+      ]
+    }
+  },
+  "bundle": {
+    "active": true,
+    "createUpdaterArtifacts": true,
+    "targets": "all",
+    "resources": {
+      "../frontend-dist/index.html": "browser-ui/index.html",
+      "../frontend-dist/favicon.svg": "browser-ui/favicon.svg",
+      "../dist/idlr-worker*": "binaries/",
+      "../dist/IDLR-spotdl*": "binaries/"
+    },
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.icns",
+      "icons/icon.ico"
+    ],
+    "android": {
+      "debugApplicationIdSuffix": ".debug"
+    }
+  }
+}
