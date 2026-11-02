@@ -835,6 +835,10 @@
         .user-chip.open .chip-caret-svg {
             transform: rotate(180deg)
         }
+        .user-chip.open .chip-btn {
+            background: var(--redsoft);
+            border-color: var(--redglow);
+        }
 
         /* ── Popovers ── */
         .user-popover,
@@ -856,6 +860,13 @@
             transition: all .28s cubic-bezier(.2, .9, .4, 1.1);
             z-index: 100;
         }
+        .user-popover {
+            width: min(340px, calc(100vw - 24px));
+            max-height: min(70dvh, 560px);
+            overflow-y: auto;
+            overscroll-behavior: contain;
+            scrollbar-width: thin;
+        }
         .user-chip.open .user-popover {
             opacity: 1;
             visibility: visible;
@@ -868,7 +879,9 @@
         }
         .pop-banner {
             height: 72px;
-            background: linear-gradient(135deg, #ff2828 0%, #990000 100%);
+            background:
+                radial-gradient(circle at 82% 18%, rgba(255,255,255,.22), transparent 30%),
+                linear-gradient(135deg, #ff3838 0%, #990000 100%);
             position: relative
         }
         .pop-edit-hint {
@@ -921,15 +934,16 @@
             color: #fff
         }
         .pop-body {
-            padding: 36px 16px 14px
+            padding: 40px 18px 16px
         }
         .pop-identity {
-            margin-bottom: 12px
+            margin-bottom: 14px
         }
         .pop-name {
             font-size: 16px;
             font-weight: 700;
-            line-height: 1.1
+            line-height: 1.2;
+            overflow-wrap: anywhere
         }
         .pop-username {
             font-size: 11px;
@@ -950,20 +964,20 @@
         }
         .pop-stats {
             display: flex;
-            margin-bottom: 12px;
-            background: rgba(255, 255, 255, 0.04);
-            border-radius: 12px;
-            overflow: hidden;
-            border: 1px solid rgba(255, 255, 255, 0.06)
+            gap: 8px;
+            margin-bottom: 14px;
+            background: transparent;
+            border: 0;
+            overflow: visible
         }
         .pop-stat {
             flex: 1;
             text-align: center;
-            padding: 9px 0;
-            border-right: 1px solid rgba(255, 255, 255, 0.06)
-        }
-        .pop-stat:last-child {
-            border-right: none
+            min-width: 0;
+            padding: 10px 6px;
+            border: 1px solid var(--bdr);
+            border-radius: 11px;
+            background: var(--s3)
         }
         .pop-stat-n {
             font-family: 'Unbounded', sans-serif;
@@ -980,8 +994,8 @@
         }
         .pop-divider {
             height: 1px;
-            background: rgba(255, 255, 255, 0.06);
-            margin: 6px 0
+            background: var(--bdr);
+            margin: 8px 0
         }
         .pop-action {
             display: flex;
@@ -1000,7 +1014,7 @@
             text-align: left
         }
         .pop-action:hover {
-            background: rgba(255, 255, 255, 0.06);
+            background: var(--s3);
             color: var(--fg);
             transform: translateX(3px)
         }
@@ -2682,23 +2696,45 @@
         }
 
         /* ── account items ── */
+        .account-modal {
+            width: min(420px, calc(100vw - 28px));
+            max-height: min(86dvh, 720px);
+            scrollbar-width: thin;
+        }
+        .account-modal > p {
+            max-width: 34em;
+            line-height: 1.6;
+        }
+        .acct-list {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+            max-height: min(36dvh, 280px);
+            overflow-y: auto;
+            padding: 2px 3px 4px 0;
+            margin: 0 0 16px;
+            overscroll-behavior: contain;
+            scrollbar-width: thin;
+        }
         .acct-item {
             display: flex;
             align-items: center;
             gap: 10px;
-            padding: 10px 12px;
+            min-height: 60px;
+            padding: 10px 11px;
             border-radius: 12px;
-            background: rgba(255, 255, 255, 0.04);
-            border: 1px solid rgba(255, 255, 255, 0.06);
+            background: var(--s3);
+            border: 1px solid var(--bdr);
             cursor: pointer;
-            transition: all .18s
+            transition: background .18s ease, border-color .18s ease, transform .18s ease;
         }
         .acct-item:hover {
-            background: rgba(255, 255, 255, 0.08);
-            border-color: rgba(255, 255, 255, 0.12)
+            background: var(--s4);
+            border-color: var(--bdr2);
+            transform: translateY(-1px);
         }
         .acct-item.active-acct {
-            border-color: rgba(255, 32, 32, .3);
+            border-color: var(--redglow);
             background: var(--redsoft)
         }
         .acct-av {
@@ -2737,7 +2773,10 @@
             font-size: 10px;
             color: var(--fg3);
             margin-top: 1px;
-            font-family: 'DM Mono', monospace
+            font-family: 'DM Mono', monospace;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
         }
         .acct-badge {
             font-size: 9px;
@@ -2771,8 +2810,8 @@
             width: 100%;
             padding: 11px 14px;
             border-radius: 12px;
-            background: rgba(255, 255, 255, 0.04);
-            border: 1px solid rgba(255, 255, 255, 0.06);
+            background: var(--s3);
+            border: 1px solid var(--bdr);
             color: var(--fg);
             font-family: 'DM Sans', sans-serif;
             font-size: 13px;
@@ -2786,8 +2825,8 @@
             margin-bottom: 0
         }
         .acct-add-btn:hover {
-            background: rgba(255, 255, 255, 0.08);
-            border-color: rgba(255, 255, 255, 0.12);
+            background: var(--s4);
+            border-color: var(--bdr2);
             transform: translateX(2px)
         }
         .acct-add-btn.google:hover {
@@ -2930,13 +2969,32 @@
             max-width: 560px;
             max-height: min(90dvh, 900px);
             overflow-y: auto;
+            overscroll-behavior: contain;
+            scroll-padding-block: 20px;
             scrollbar-width: thin;
         }
-        .profile-modal > .modal-close { z-index: 2; }
+        .profile-modal > .modal-close {
+            z-index: 2;
+            top: 12px;
+            right: 12px;
+            width: 36px;
+            height: 36px;
+            display: grid;
+            place-items: center;
+            padding: 0;
+            border: 1px solid rgba(255,255,255,.2);
+            border-radius: 50%;
+            background: rgba(10,10,10,.55);
+            color: #fff;
+            backdrop-filter: blur(12px);
+        }
+        .profile-modal > .modal-close:hover { background: rgba(10,10,10,.82); }
         .prof-banner {
             position: relative;
-            height: 108px;
-            background: linear-gradient(135deg, #ff2020, #880000);
+            height: 132px;
+            background:
+                radial-gradient(circle at 78% 18%, rgba(255,255,255,.2), transparent 30%),
+                linear-gradient(135deg, #ff3838, #780000);
             border-radius: 20px 20px 0 0;
             margin: -28px -28px 0;
             overflow: hidden;
@@ -2961,19 +3019,26 @@
             font: 600 11px 'DM Sans',sans-serif;
             cursor: pointer;
             backdrop-filter: blur(12px);
+            transition: background .18s ease, border-color .18s ease, transform .18s ease;
         }
-        .prof-cover-edit:hover { background: rgba(10,10,10,.85); }
+        .prof-cover-edit:hover { background: rgba(10,10,10,.85); border-color: rgba(255,255,255,.4); }
         .prof-av-wrap {
             position: relative;
             display: inline-block;
-            margin-top: -36px;
-            margin-left: 20px;
+            flex: 0 0 auto;
+            margin-top: -42px;
+            margin-left: 4px;
+            padding: 0;
+            border: 0;
+            background: transparent;
+            color: inherit;
+            font: inherit;
             cursor: pointer;
             z-index: 2;
         }
         .prof-av {
-            width: 72px;
-            height: 72px;
+            width: 82px;
+            height: 82px;
             border-radius: 50%;
             border: 3px solid var(--card);
             background: var(--red);
@@ -2984,10 +3049,12 @@
             font-size: 26px;
             color: #fff;
             overflow: hidden;
-            transition: box-shadow .2s
+            box-shadow: 0 8px 24px rgba(0,0,0,.24);
+            transition: box-shadow .2s, transform .2s
         }
         .prof-av:hover {
-            box-shadow: 0 0 20px rgba(255, 32, 32, .5)
+            box-shadow: 0 0 22px rgba(255, 32, 32, .42);
+            transform: scale(1.025)
         }
         .prof-av img {
             width: 100%;
@@ -3011,6 +3078,28 @@
             background: var(--red);
             color: #fff;
             font-size: 11px;
+            box-shadow: 0 3px 9px rgba(0,0,0,.28)
+        }
+        .prof-identity-row {
+            display: flex;
+            align-items: flex-end;
+            gap: 14px;
+            min-width: 0;
+            margin-bottom: 20px;
+        }
+        .prof-identity-copy { min-width: 0; padding-bottom: 3px; }
+        .prof-display-name {
+            color: var(--fg);
+            font-size: 19px;
+            font-weight: 750;
+            line-height: 1.2;
+            overflow-wrap: anywhere;
+        }
+        .prof-display-user {
+            margin-top: 5px;
+            color: var(--fg3);
+            font-size: 11px;
+            overflow-wrap: anywhere;
         }
         .prof-image-studio {
             margin: 0 0 18px;
@@ -3038,6 +3127,7 @@
             color: var(--fg3);
             font: 600 10px 'DM Sans',sans-serif;
             cursor: pointer;
+            transition: color .18s ease, border-color .18s ease, background .18s ease;
         }
         .prof-target-btn.active { color: var(--fg); border-color: var(--red); background: var(--redsoft); }
         .prof-image-upload {
@@ -3049,6 +3139,7 @@
             color: var(--fg2);
             font: 600 11px 'DM Sans',sans-serif;
             cursor: pointer;
+            transition: border-color .18s ease, background .18s ease, color .18s ease;
         }
         .prof-image-upload:hover { border-color: var(--red); background: var(--redsoft); }
         .prof-image-gallery {
@@ -3101,21 +3192,31 @@
         }
         .prof-gallery-empty { grid-column: 1/-1; color: var(--fg3); font-size: 10px; padding: 10px 2px; }
         .prof-stat-row {
-            display: flex;
-            gap: 24px;
-            margin: 16px 0 20px
+            display: grid;
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+            gap: 10px;
+            margin: 0 0 20px
+        }
+        .prof-stat {
+            min-width: 0;
+            padding: 12px 14px;
+            border: 1px solid var(--bdr);
+            border-radius: 14px;
+            background: var(--s3)
         }
         .prof-stat-n {
             font-family: 'Unbounded', sans-serif;
-            font-size: 18px;
+            font-size: 17px;
             font-weight: 700
         }
         .prof-stat-l {
             font-size: 9px;
             color: var(--fg3);
             text-transform: uppercase;
+            letter-spacing: .07em;
             margin-top: 4px
         }
+        .profile-modal .btn-red { width: 100%; min-height: 44px; }
         .star-row {
             display: flex;
             gap: 10px;
@@ -3526,6 +3627,18 @@
             background: var(--s3);
             border: 1px solid var(--bdr);
         }
+        body.desktop-shell .user-popover {
+            top: auto;
+            right: auto;
+            bottom: calc(100% + 10px);
+            left: 0;
+            width: min(340px, calc(100vw - 24px));
+            max-height: min(72dvh, 560px);
+            transform: translateY(12px) scale(.96);
+            border-color: var(--bdr2);
+            background: var(--card);
+            box-shadow: 0 24px 70px rgba(0,0,0,.38);
+        }
         body.desktop-shell .chip-info { max-width: 132px; }
         body.desktop-shell .pages {
             grid-column: 2;
@@ -3845,6 +3958,38 @@
                 right: 12px;
                 width: min(390px, calc(100vw - 24px));
             }
+            .user-popover {
+                position: fixed;
+                top: 62px;
+                right: 12px;
+                left: auto;
+                width: min(340px, calc(100vw - 24px));
+                max-height: min(74dvh, 560px);
+            }
+            body.desktop-shell .user-popover {
+                position: fixed;
+                top: auto;
+                right: 12px;
+                bottom: 12px;
+                left: 12px;
+                width: auto;
+                max-height: min(78dvh, 560px);
+            }
+            #prof-modal {
+                align-items: flex-end;
+                padding: 0;
+            }
+            .profile-modal {
+                width: 100%;
+                max-width: 100%;
+                max-height: 92dvh;
+                margin-top: auto;
+                border-radius: 22px 22px 0 0;
+            }
+            .prof-banner { height: 118px; }
+            .prof-studio-head { flex-direction: column; }
+            .prof-studio-targets { width: 100%; }
+            .prof-target-btn { flex: 1; min-height: 34px; }
             .hist-tabs { gap: 4px; padding: 4px; }
             .hist-tab { min-height: 40px; padding: 8px 5px; font-size: 10px; }
             .hist-tab-label { overflow: hidden; text-overflow: ellipsis; }
@@ -4020,14 +4165,14 @@
             <div class="modal profile-modal"><button class="modal-close" onclick="closeProfModal()">✕</button>
                 <div class="prof-banner" id="prof-banner">
                     <img id="prof-banner-img" alt="" style="display:none" />
-                    <button class="prof-cover-edit" onclick="openImageStudio('banner')">✦ Edit cover</button>
+                    <button class="prof-cover-edit" type="button" title="Choose a cover image" aria-label="Choose a cover image" onclick="openImageStudio('banner')">✦ Edit cover</button>
                 </div>
-                <div style="display:flex;align-items:flex-end;gap:14px;margin-bottom:16px">
-                    <div class="prof-av-wrap" onclick="openImageStudio('avatar')" title="Change profile picture">
+                <div class="prof-identity-row">
+                    <button class="prof-av-wrap" type="button" onclick="openImageStudio('avatar')" title="Change profile picture" aria-label="Change profile picture">
                         <div class="prof-av" id="prof-av-circle"><span id="prof-av-init">?</span></div>
-                        <span class="prof-photo-action">✎</span>
-                    </div>
-                    <div><div style="font-size:18px;font-weight:700" id="prof-disp-name">—</div><div style="font-size:12px;color:var(--fg3)" id="prof-disp-user">—</div></div>
+                        <span class="prof-photo-action" aria-hidden="true">✎</span>
+                    </button>
+                    <div class="prof-identity-copy"><div class="prof-display-name" id="prof-disp-name">—</div><div class="prof-display-user" id="prof-disp-user">—</div></div>
                 </div>
                 <div class="prof-image-studio" id="prof-image-studio" hidden>
                     <div class="prof-studio-head">
@@ -4101,11 +4246,11 @@
 
         <!-- Account switcher -->
         <div class="modal-bg" id="acct-modal" style="display:none" onclick="if(event.target===this)closeAccountSwitcher()">
-            <div class="modal" style="width:380px">
+            <div class="modal account-modal">
                 <button class="modal-close" onclick="closeAccountSwitcher()">✕</button>
-                <h3>👥 Accounts</h3>
-                <p style="font-size:11px;color:var(--fg3);margin-bottom:16px">Switch between accounts or add a new one. Unlimited accounts supported.</p>
-                <div id="acct-list" style="display:flex;flex-direction:column;gap:7px;margin-bottom:14px"></div>
+                <h3>Accounts</h3>
+                <p style="font-size:11px;color:var(--fg3);margin-bottom:16px">Switch between saved accounts or add another one.</p>
+                <div class="acct-list" id="acct-list"></div>
                 <div class="settings-section-label" style="margin-top:4px">Add Account</div>
                 <button class="acct-add-btn" onclick="beginAddAccount('email')">
                     ✉️ &nbsp;Add with Email &amp; Password
