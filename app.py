@@ -6,6 +6,7 @@ Fast · Private · Unlimited
 """
 import argparse, base64, hashlib, json, os, re, shutil, subprocess, sys, tempfile, urllib.request, zipfile
 import io
+import importlib.util
 from pathlib import Path
 
 APP_VERSION = "2.0.5"
@@ -100,10 +101,21 @@ def _pip_install(pkg, timeout=180):
 
 
 log("SETUP", "Checking dependencies (flask, yt-dlp, static-ffmpeg, spotdl) ...")
+OPTIONAL_IMPORTS = {"static-ffmpeg": "static_ffmpeg", "spotdl": "spotdl"}
 for p, i in [("flask", "flask"), ("yt-dlp", "yt_dlp"),
              ("static-ffmpeg", "static_ffmpeg"), ("spotdl", "spotdl")]:
     try:
-        __import__(i)
+        if p in OPTIONAL_PKGS:
+            # Presence check only — see _finish_startup_checks(). Importing
+            # spotdl costs ~1.3 s (fastapi, mutagen, aiohttp, ytmusicapi behind
+            # it) on every single launch, and it is only ever needed for a
+            # Spotify link, which runs in its own child process anyway. On a
+            # cold Windows start with antivirus scanning the extracted files
+            # that import was a visible chunk of "IDLR takes forever to open".
+            if importlib.util.find_spec(i) is None:
+                raise ImportError(f"{p} is not installed")
+        else:
+            __import__(i)
         log("SETUP", f"  [OK] {p} already installed")
     except Exception as e:
         # NOTE: except Exception (not just ImportError) — a broken install can
@@ -142,14 +154,19 @@ from flask import Flask, request, jsonify, Response, send_from_directory
 import yt_dlp, shutil, json, hashlib, datetime
 import threading, uuid, re, time, socket, webbrowser
 
-try:
-    import static_ffmpeg
-except Exception:  # already reported above; degrade instead of crashing
-    static_ffmpeg = None
+# `import static_ffmpeg` costs ~120 ms (its package __init__ wires up a download
+# helper and a file lock) and the only thing that needs it is the FFmpeg check
+# below — which is why that check now runs in the background too. Bound lazily by
+# _finish_startup_checks(); every use site treats None as "not available yet".
+static_ffmpeg = None
 
-log("SETUP", "Preparing FFmpeg ...")
+log("SETUP", "Preparing FFmpeg in the background ...")
 
 _FFMPEG_READY = False
+# Set once the background startup checks have resolved FFmpeg and the optional
+# packages. A job that starts a fraction of a second after launch waits on this
+# instead of concluding that FFmpeg is missing.
+_STARTUP_CHECKS = threading.Event()
 
 
 def _bundled_ffmpeg_dir():
@@ -224,6 +241,15 @@ def _setup_ffmpeg():
     # Nothing on disk: fetch it in the background so opening IDLR never waits
     # on a 30 MB download. refresh_ffmpeg_paths() picks it up from the next
     # download onwards.
+    if os.environ.get("IDLR_NO_AUTO_INSTALL") == "1":
+        # The same switch the dependency probe above honours: "do not fetch
+        # anything at startup". Tests and CI run with it, because a 30 MB
+        # download started by a background thread while assertions are running
+        # is a source of flakes, not of coverage. FFmpeg simply stays unset,
+        # which is a supported state (the app says so and keeps working).
+        log("SETUP", "  [..] FFmpeg not found — skipping the automatic download (IDLR_NO_AUTO_INSTALL=1)")
+        return
+
     def fetch():
         global _FFMPEG_READY
         try:
@@ -243,17 +269,24 @@ def _setup_ffmpeg():
     log("SETUP", "  [..] FFmpeg not found — preparing it in the background")
 
 
-_setup_ffmpeg()
 FFMPEG = shutil.which("ffmpeg") or ""
 
 
-def refresh_ffmpeg_paths():
+def refresh_ffmpeg_paths(wait=0.0):
     """Re-detect ffmpeg/ffprobe before a job.
 
     If the background FFmpeg setup from earlier in this run has finished, the
     next download picks it up without needing an app restart.
+
+    `wait` is for the job that starts within moments of launch: FFmpeg is now
+    prepared in a background thread, so a download kicked off immediately would
+    otherwise conclude "no FFmpeg" and produce an unconverted file. It waits at
+    most that long, and only while the checks are still running — once they are
+    done the answer is known, so a machine without FFmpeg never waits twice.
     """
     global FFMPEG, _FFMPEG_READY
+    if wait and not _FFMPEG_READY and not _STARTUP_CHECKS.is_set():
+        _STARTUP_CHECKS.wait(wait)
     found = shutil.which("ffmpeg") or ""
     if found:
         _FFMPEG_READY = True
@@ -262,6 +295,56 @@ def refresh_ffmpeg_paths():
             log("SETUP", f"FFmpeg ready: {found}")
     return FFMPEG
 
+
+def _finish_startup_checks():
+    """Import the optional packages and prepare FFmpeg — *after* the app is up.
+
+    Everything here is a cost that used to be paid serially inside `import app`,
+    which is exactly what the packaged worker's startup is: ~120 ms for
+    static-ffmpeg, ~1.3 s for spotdl, plus a certificate-sensitive download on a
+    cold machine. The startup probe now only asks whether each package is
+    installed (`find_spec`), and this thread pays the real cost a moment later so
+    `BROKEN_PKGS`, the Spotify engine badge, the FFmpeg badge and the health
+    banner become accurate instead of merely optimistic.
+
+    A package that is installed but broken (the pydantic-core clash from the
+    changelog) is still reported rather than silently mislabelled. Nothing here
+    is on the critical path of a download: `_ytdlp_run` calls
+    refresh_ffmpeg_paths() per job, so a download started before this finishes
+    simply takes the existing fallback path.
+    """
+    global static_ffmpeg
+    try:
+        for pkg, module in OPTIONAL_IMPORTS.items():
+            try:
+                imported = __import__(module)
+                if module == "static_ffmpeg":
+                    static_ffmpeg = imported
+            except Exception as e:
+                if pkg in BROKEN_PKGS:
+                    continue
+                BROKEN_PKGS.add(pkg)
+                note = ("spotdl is unavailable — Spotify downloads fall back to YouTube matching."
+                        if pkg == "spotdl" else
+                        "FFmpeg helper (static-ffmpeg) is unavailable — using the system FFmpeg instead.")
+                SETUP_PROBLEMS.append(note)
+                log("SETUP", f"  [WARN] {pkg} could not be loaded after all "
+                             f"({type(e).__name__}: {str(e)[:110]}). {note}")
+            if pkg == "static-ffmpeg":
+                # Resolve FFmpeg immediately — before spotdl, the slow import of
+                # the two — because a job that started during startup is waiting
+                # on the PATH this sets up. OPTIONAL_IMPORTS is ordered so the
+                # FFmpeg helper is always the first entry.
+                _setup_ffmpeg()
+        log("SETUP", "Optional components verified.")
+    except Exception as e:  # a background check must never be an app crash
+        log("SETUP", f"  [WARN] Startup checks did not finish ({type(e).__name__}: {str(e)[:110]})")
+    finally:
+        _STARTUP_CHECKS.set()
+
+
+threading.Thread(target=_finish_startup_checks, name="idlr-startup-checks",
+                 daemon=True).start()
 
 log("SETUP", "Application modules ready.")
 
@@ -452,7 +535,11 @@ def get_movie_opts(job, url, quality, fmt, savepath):
         "socket_timeout": 30,
         "retries": 5,
         "fragment_retries": 10,
-        "concurrent_fragment_downloads": 5,
+        # Each fragment is ~10 s of media and costs a full round-trip, so on a
+        # high-latency or Wi-Fi connection the speed is limited by how many
+        # requests are in flight, not by bandwidth. Eight is the range yt-dlp
+        # documents as useful for HLS/DASH without getting us throttled.
+        "concurrent_fragment_downloads": 8,
         # Headers to look like a browser
         "http_headers": {
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36",
@@ -905,7 +992,7 @@ def _spotify_run(job, url, savepath, user, fmt, quality="320k", job_id="?", want
         pass
 
     try:
-        refresh_ffmpeg_paths()
+        refresh_ffmpeg_paths(wait=8)
         if getattr(sys, "frozen", False):
             worker_name = "IDLR-spotdl.exe" if os.name == "nt" else "IDLR-spotdl"
             worker_path = _find_bundled_binary(worker_name)
@@ -1065,7 +1152,9 @@ def _ytdlp_run(job, url, mode, quality, fmt, savepath, user,
     log("YT-DLP", f"[{job_id}] {url}")
     log("YT-DLP", f"[{job_id}] mode={mode} quality={quality} format={fmt} thumb={'on' if want_thumb else 'off'} playlist_all={'on' if playlist_all else 'off'}")
     log("YT-DLP", f"[{job_id}] Target folder: {savepath}")
-    refresh_ffmpeg_paths()
+    # FFmpeg is prepared off the startup path, so a download started in the
+    # first instants gets a moment to inherit it (see refresh_ffmpeg_paths).
+    refresh_ffmpeg_paths(wait=8)
     if not FFMPEG:
         _log_to(job, {"t":"⚠ FFmpeg not found — merging/MP3 may fail. Install FFmpeg.","c":"err"})
         log("YT-DLP", f"[{job_id}] WARNING: FFmpeg not found on PATH")

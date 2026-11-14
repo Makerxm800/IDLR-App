@@ -28,7 +28,6 @@ New" list in ``index.html`` and add a README changelog entry for the number.
 from __future__ import annotations
 
 import argparse
-import json
 import re
 import sys
 from pathlib import Path
@@ -37,16 +36,27 @@ ROOT = Path(__file__).resolve().parents[1]
 VERSION_RE = re.compile(r"^\d+\.\d+\.\d+$")
 
 
+# Line endings each file was found with. A Windows checkout of this repo turns
+# these files into CRLF (git's autocrlf), and every pattern below is written
+# against LF — that mismatch is what failed the v2.0.5 build on the Windows
+# runner: `name = "idlr"\nversion = ...` never matches `...\r\nversion = ...`.
+# So parsing always sees LF, and writing restores whatever the file had.
+_EOL_STYLE: dict[str, str] = {}
+
+
 def _read(path: Path) -> str:
-    # newline="" keeps every byte's line ending exactly as stored, so a run on
-    # Windows cannot rewrite the whole file with CRLF.
-    with open(path, encoding="utf-8", newline="") as stream:
-        return stream.read()
+    with open(path, "rb") as stream:
+        raw = stream.read()
+    text = raw.decode("utf-8")
+    _EOL_STYLE[str(path)] = "\r\n" if "\r\n" in text else "\n"
+    return text.replace("\r\n", "\n")
 
 
 def _write(path: Path, text: str) -> None:
-    with open(path, "w", encoding="utf-8", newline="") as stream:
-        stream.write(text)
+    eol = _EOL_STYLE.get(str(path), "\n")
+    data = text.replace("\n", eol) if eol != "\n" else text
+    with open(path, "wb") as stream:
+        stream.write(data.encode("utf-8"))
 
 
 def _sub_once(path: Path, pattern: str, repl: str, text: str) -> str:
@@ -82,7 +92,7 @@ def _cargo_lock_text(version: str | None, text: str) -> str:
     return body
 
 
-NPM_ROOT_MARKER = '"packages": {\n    "": {'
+NPM_ROOT_MARKER = re.compile(r'"packages":\s*\{\s*"":\s*\{')
 
 
 def _npm_lock_span(text: str) -> tuple[int, int]:
@@ -92,9 +102,10 @@ def _npm_lock_span(text: str) -> tuple[int, int]:
     on the `packages[""]` entry npm writes first. A lockfile left behind is what
     makes `npm ci` fail or rebuild with the previous release's number.
     """
-    start = text.find(NPM_ROOT_MARKER)
-    if start < 0:
+    anchor = NPM_ROOT_MARKER.search(text)
+    if not anchor:
         raise SystemExit("package-lock.json: no `packages[\"\"]` entry to anchor on")
+    start = anchor.start()
     window = text[start:start + 400]
     match = re.search(r'"version":\s*"([^"]+)"', window)
     if not match:

@@ -23,6 +23,19 @@ from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parent
+
+# Never imported by a headless yt-dlp/spotdl worker; see run_pyinstaller().
+BUNDLE_EXCLUDES = (
+    "tkinter",
+    "matplotlib",
+    "IPython",
+    "pytest",
+    "notebook",
+    "PyQt5",
+    "PyQt6",
+    "PySide2",
+    "PySide6",
+)
 DIST = ROOT / "dist"
 BUILD = ROOT / "build"
 IS_WINDOWS = sys.platform == "win32"
@@ -181,6 +194,13 @@ def run_pyinstaller(name, script):
         "--collect-all",
         "ytmusicapi",
     ]
+    # --collect-all drags in each package's optional extras, and PyInstaller's
+    # hooks happily add GUI/plotting/test stacks that a headless downloader
+    # never imports. With --onefile, every byte of that is unpacked into
+    # %TEMP% on every launch (and scanned by antivirus), so excluding them is
+    # both a startup win and a smaller, more boring PE.
+    for module in BUNDLE_EXCLUDES:
+        command += ["--exclude-module", module]
     if IS_WINDOWS:
         version_file = write_windows_version_file(work / f"{name}.version.txt", name, version_text)
         command += ["--version-file", str(version_file)]

@@ -1,0 +1,22 @@
+# Normalise line endings in the repository so a clone looks the same on every
+# OS. This is not cosmetic: scripts/set_version.py parses Cargo.lock and
+# package-lock.json with patterns written against LF, and a Windows checkout with
+# core.autocrlf=true turned those files into CRLF — which failed the v2.0.5
+# release build. Text files stay LF in the working tree too; binaries are left
+# completely alone.
+* text=auto eol=lf
+
+*.png binary
+*.ico binary
+*.icns binary
+*.jpg binary
+*.svg text
+*.woff binary
+*.woff2 binary
+*.ttf binary
+*.pdf binary
+*.zip binary
+*.exe binary
+*.dll binary
+*.dylib binary
+*.so binary

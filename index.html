@@ -4545,6 +4545,10 @@
                         <span class="icon">ℹ️</span>
                         <span class="text"><strong>Version shown is the real one</strong> — the app no longer prints a hard-coded version number in the Info panel and footers, so what you see matches what IDLR will update from.</span>
                     </div>
+                    <div class="whatsnew-item">
+                        <span class="icon">⚡</span>
+                        <span class="text"><strong>Opens faster</strong> — startup no longer imports every optional component just to check it exists, and the single-file app carries fewer unused files, so there is less to unpack and less for antivirus to read on every launch on Windows, Linux and macOS.</span>
+                    </div>
                 </div>
                 <button class="btn-red" onclick="closeWhatsNew()" style="margin-top:4px">Got it!</button>
             </div>
@@ -7837,6 +7841,11 @@
             });
             loadNotifications();
             ensureAppVersion();
+            // The startup probe only *checks* the optional pieces (spotdl, the FFmpeg
+            // helper) and finishes verifying them in the background, so the first
+            // /api/info of a session can be honest-but-incomplete. Re-read it once
+            // those checks have had their turn, before anyone opens Settings.
+            setTimeout(() => { try { loadInfo(); } catch (e) { /* ignore */ } }, 4000);
 
             document.getElementById('inp-pw')?.addEventListener('keydown', e => { if (e.key === 'Enter') doAuth(); });
             document.getElementById('inp-email')?.addEventListener('keydown', e => { if (e.key === 'Enter') doAuth(); });
