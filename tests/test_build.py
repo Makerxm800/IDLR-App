@@ -6,9 +6,12 @@ it here against the same signature PyInstaller defines.
 """
 
 import json
+import os
+import shutil
 import sys
 import tempfile
 import unittest
+import unittest.mock
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -125,6 +128,100 @@ class VersionFileTests(unittest.TestCase):
         self.assertIn("if not IS_FROZEN and os.environ.get(\"IDLR_NO_AUTO_INSTALL\") != \"1\":",
                       app_source)
         self.assertIn("if IS_FROZEN:", app_source)
+
+
+class SharedFFmpegBundlingTests(unittest.TestCase):
+    """FFmpeg is staged once beside the helpers, not embedded inside each one.
+
+    `--collect-all static_ffmpeg` used to copy the ~80 MB of binaries it
+    downloads into its package folder into *both* onefile exes — which is what
+    made the Windows installer 235 MB and made every launch re-extract ~160 MB
+    into a random %TEMP% folder before doing anything.
+    """
+
+    def test_pyinstaller_collects_the_module_not_its_binaries(self):
+        source = (ROOT / "build.py").read_text(encoding="utf-8")
+        self.assertNotIn('"--collect-all",\n        "static_ffmpeg"', source,
+                         "collecting static-ffmpeg wholesale embeds its downloaded FFmpeg per helper")
+        self.assertIn('"--collect-submodules",\n        "static_ffmpeg"', source)
+
+    def test_staging_copies_both_tools_once(self):
+        # Both platforms, every run: the packaged names differ by suffix, and the
+        # first version of this test only ever checked the one it was written on
+        # (which is exactly how it went red on the Windows runner).
+        for windows in (False, True):
+            suffix = ".exe" if windows else ""
+            with self.subTest(windows=windows), tempfile.TemporaryDirectory() as tmp:
+                bin_dir = Path(tmp) / "bin"
+                bin_dir.mkdir()
+                for tool in ("ffmpeg", "ffprobe"):
+                    (bin_dir / (tool + suffix)).write_text("#!/bin/sh\n", encoding="utf-8")
+                stage = Path(tmp) / "dist" / "ffmpeg"
+                with (
+                    unittest.mock.patch.object(build, "IS_WINDOWS", windows),
+                    unittest.mock.patch.object(build.shutil, "which",
+                                               side_effect=lambda name, *a, **k:
+                                               str(bin_dir / (name + suffix))
+                                               if name in ("ffmpeg", "ffprobe") else None),
+                    unittest.mock.patch.object(build, "ffmpeg_staging_dir", lambda: stage),
+                ):
+                    self.assertTrue(build.stage_ffmpeg_for_bundling())
+                expected = sorted(tool + suffix for tool in ("ffmpeg", "ffprobe"))
+                self.assertEqual(sorted(path.name for path in stage.iterdir()), expected)
+                self.assertFalse((stage / "FFmpeg-not-staged.txt").exists())
+
+    def test_a_build_without_ffmpeg_still_produces_a_bundle(self):
+        """Tauri refuses a resource glob that matches nothing, so the folder has
+        to exist even when the builder had no FFmpeg — and IDLR must still run
+        (it tells the user instead of crashing)."""
+        with tempfile.TemporaryDirectory() as tmp:
+            stage = Path(tmp) / "dist" / "ffmpeg"
+            with (
+                unittest.mock.patch.object(build.shutil, "which", return_value=None),
+                unittest.mock.patch.object(build, "ffmpeg_staging_dir", lambda: stage),
+            ):
+                self.assertFalse(build.stage_ffmpeg_for_bundling())
+            self.assertTrue((stage / "FFmpeg-not-staged.txt").is_file())
+
+    def test_staging_happens_before_the_bundler_runs(self):
+        main_body = (ROOT / "build.py").read_text(encoding="utf-8").split("def main():", 1)[1]
+        self.assertLess(main_body.index("stage_ffmpeg_for_bundling()"),
+                        main_body.index('run_pyinstaller("idlr-worker"'),
+                        "the shared copy must exist before Tauri collects resources")
+
+    def test_installer_maps_the_folder_into_the_resources(self):
+        config = json.loads((ROOT / "src-tauri" / "tauri.conf.json").read_text(encoding="utf-8"))
+        self.assertEqual(config["bundle"]["resources"].get("../dist/ffmpeg/*"), "binaries/ffmpeg/")
+
+    def test_the_frozen_helper_finds_it_next_to_its_exe(self):
+        sys.path.insert(0, str(ROOT))
+        import app as idlr
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            binaries = root / "resources" / "binaries"
+            exe = binaries / ("idlr-worker.exe" if os.name == "nt" else "idlr-worker")
+            exe.parent.mkdir(parents=True)
+            exe.write_bytes(b"")
+            # Whatever this platform calls them; the layout is the point.
+            names = [tool + (".exe" if os.name == "nt" else "") for tool in ("ffmpeg", "ffprobe")]
+            for layout in ("folder", "flat"):
+                target = binaries / "ffmpeg" if layout == "folder" else binaries
+                target.mkdir(parents=True, exist_ok=True)
+                for name in names:
+                    (target / name).write_bytes(b"")
+                with unittest.mock.patch.object(idlr, "IS_FROZEN", True):
+                    found = idlr._shipped_ffmpeg_dir(str(exe))
+                self.assertTrue(found, f"the shipped FFmpeg was not found in the {layout} layout")
+                shutil.rmtree(target, ignore_errors=True)
+
+    def test_a_source_checkout_is_unaffected(self):
+        sys.path.insert(0, str(ROOT))
+        import app as idlr
+
+        with tempfile.TemporaryDirectory() as tmp:
+            with unittest.mock.patch.object(idlr, "IS_FROZEN", False):
+                self.assertEqual(idlr._shipped_ffmpeg_dir(str(Path(tmp) / "python")), "")
 
 
 if __name__ == "__main__":

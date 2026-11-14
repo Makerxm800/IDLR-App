@@ -162,6 +162,51 @@ def fetch_ffmpeg_for_bundling():
         return False
 
 
+def ffmpeg_staging_dir():
+    return DIST / "ffmpeg"
+
+
+def stage_ffmpeg_for_bundling():
+    """Copy the FFmpeg binaries into `dist/ffmpeg/` so they ship *once*.
+
+    Until now every helper embedded its own copy: `--collect-all static_ffmpeg`
+    pulled `static_ffmpeg/bin/<platform>/ffmpeg.exe` (~80 MB) plus ffprobe into
+    the worker AND into the spotdl helper, which is most of why the Windows
+    installer is 235 MB and the Linux AppImage 494 MB. With --onefile that also
+    meant every launch re-extracted ~160 MB into %TEMP% before doing anything —
+    the single biggest reason IDLR feels slow to open, and the behaviour
+    antivirus likes to read as a dropper unpacking binaries.
+
+    tauri.conf.json maps `../dist/ffmpeg/*` to `binaries/ffmpeg/`, so the files
+    land next to the helpers in the install folder, are written once by the
+    installer, and app.py finds them by looking beside its own executable.
+    """
+    target = ffmpeg_staging_dir()
+    target.mkdir(parents=True, exist_ok=True)
+    staged = []
+    for tool in ("ffmpeg", "ffprobe"):
+        source = shutil.which(tool)
+        if not source:
+            continue
+        destination = target / (tool + (".exe" if IS_WINDOWS else ""))
+        shutil.copy2(source, destination)
+        staged.append(f"{tool}: {destination.stat().st_size / 1048576:.1f} MB")
+    if len(staged) < 2:
+        # Tauri refuses a resource glob that matches no file, and an IDLR build
+        # without FFmpeg is still a working app — it says so in the UI instead
+        # of crashing. A placeholder keeps the bundle building either way.
+        (target / "FFmpeg-not-staged.txt").write_text(
+            "IDLR expects ffmpeg and ffprobe next to this file. This build could "
+            "not stage them (no FFmpeg was available at build time), so IDLR will "
+            "fall back to a system FFmpeg and say so in the banner instead of "
+            "failing.\n",
+            encoding="utf-8",
+        )
+    print("IDLR: staged shared FFmpeg for bundling — " + (", ".join(staged) if staged
+          else "nothing found; the app will use a system FFmpeg"))
+    return len(staged) == 2
+
+
 def run_pyinstaller(name, script):
     work = BUILD / name
     work.mkdir(parents=True, exist_ok=True)
@@ -187,7 +232,10 @@ def run_pyinstaller(name, script):
         str(work),
         "--collect-all",
         "yt_dlp",
-        "--collect-all",
+        # Only the module: `--collect-all` would also embed the ~80 MB of FFmpeg
+        # binaries it downloaded into its package folder, per helper. The shared
+        # copy staged by stage_ffmpeg_for_bundling() is what ships now.
+        "--collect-submodules",
         "static_ffmpeg",
         "--collect-all",
         "spotdl",
@@ -221,6 +269,7 @@ def windows_short_path(path):
 def main():
     DIST.mkdir(exist_ok=True)
     fetch_ffmpeg_for_bundling()
+    stage_ffmpeg_for_bundling()
     run_pyinstaller("idlr-worker", "download_worker.py")
     run_pyinstaller("IDLR-spotdl", "spotdl_worker.py")
 
