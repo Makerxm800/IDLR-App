@@ -277,7 +277,10 @@ idlr/
 - **Windows-style animated tabs, same layout.** Download/History and the history filters now slide their selection highlight between buttons, with a hover ghost that follows the pointer, a press squash and a click ripple; the desktop sidebar uses the accent-bar treatment. The tabs are a real tablist now, so arrows/Home/End work and focus is visible.
 - **Fewer silent failures.** Trash restore/empty report honest results, the FFmpeg badge no longer says "Built-in" when FFmpeg is missing, and history/accounts writes are locked so two downloads finishing together cannot drop a row.
 - **Memory bounded.** Finished download jobs and per-job console logs are capped, which is what let a long session grow until the worker was killed.
+- **Opens faster on every OS.** The startup check used to import each optional package serially to see whether it was installed — importing `spotdl` alone costs ~1.3 s, on every launch, inside the packaged worker. It now checks presence with `find_spec`, verifies the optional pieces in a background thread, and re-reads the health state in the UI a moment later, so the banner stays truthful. PyInstaller drops GUI/plotting/test modules that a headless downloader never imports, which is less to extract from the single-file launcher and less for antivirus to scan.
+- **Faster fragmented downloads.** HLS/DASH segments now download eight at a time instead of five — on a high-latency connection, in-flight requests are the limit, not bandwidth.
 - **Packaging**: helpers and the installer get real version metadata, UPX is disabled, and `signtool` runs when `IDLR_SIGN_THUMBPRINT` is configured.
+- **Release tooling works on a Windows checkout.** `scripts/set_version.py` parses `Cargo.lock` and `package-lock.json` line-ending-independently (the v2.0.5 attempt failed because `core.autocrlf` turned those patterns into no-matches), and `.gitattributes` normalises the repository so a clone looks the same on all three OSes.
 - Added `tests/test_frontend.py`, `tests/test_build.py` and `tests/test_release.py`, and `scripts/set_version.py` so a release cannot ship with a stale version number.
 
 ### v2.0.4 — release test fixes
