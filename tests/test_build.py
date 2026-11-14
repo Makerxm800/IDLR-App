@@ -78,12 +78,16 @@ class VersionFileTests(unittest.TestCase):
         self.assertIn("media downloader helper", strings["FileDescription"])
         self.assertNotIn("\n\n", text)
 
-    def test_version_file_survives_a_missing_package_json(self):
+    def test_a_missing_version_manifest_is_a_build_error_not_a_default(self):
+        """Guessing a version would stamp the exe with an old number, which makes
+        the updater offer an update that is already installed."""
         with tempfile.TemporaryDirectory() as tmp:
             original = build.ROOT
             try:
                 build.ROOT = Path(tmp)  # no package.json here
-                self.assertEqual(build._version_fields()[1], "2.0.4")
+                with self.assertRaises(SystemExit) as caught:
+                    build._version_fields()
+                self.assertIn("set_version.py", str(caught.exception))
             finally:
                 build.ROOT = original
 

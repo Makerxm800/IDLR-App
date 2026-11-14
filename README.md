@@ -10,7 +10,7 @@ Everything runs locally on your machine.
 ![yt‑dlp](https://img.shields.io/badge/yt--dlp-latest-orange)
 ![spotdl](https://img.shields.io/badge/spotdl-latest-brightgreen)
 
-> **Current version: v2.0.4** — a native Tauri desktop app with a bundled media worker, plus a local browser option. Both use the same features and local data, with layouts designed for their respective screens.
+> **Current version: v2.0.5** — a native Tauri desktop app with a bundled media worker, plus a local browser option. Both use the same features and local data, with layouts designed for their respective screens.
 
 [Download the latest Windows setup](https://github.com/Makerxm800/IDLR-App/releases/latest/download/IDLR-App-Setup.exe) · [All releases](https://github.com/Makerxm800/IDLR-App/releases)
 
@@ -98,7 +98,7 @@ The Settings panel keeps **Update download engine** for yt-dlp/spotdl and has a 
 
 The release workflow targets `Makerxm800/IDLR-App`. Generate the signing key once with `npm run tauri -- signer generate -w "$env:USERPROFILE\.tauri\idlr-updater.key"`; the public key is already configured in `src-tauri/tauri.conf.json`. Keep a secure backup of the private key: losing it prevents future updates. Do not commit it or share it in chat. Before publishing, add the private key contents as the repository Actions secret `TAURI_SIGNING_PRIVATE_KEY`. If you protect the key with a password, also add `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` as an Actions secret. The local build commands above use the key file path; CI uses the secret contents.
 
-Push a matching version tag (for example `v2.0.4`). GitHub Actions builds signed Windows, Linux, and macOS packages, runs the test suite, publishes the Windows setup, Linux AppImage, macOS DMG and macOS updater archive, and removes stale build files from that release. The updater manifest includes its package signatures, so standalone signature files are not needed in the release downloads.
+A release starts with one command, because the version has to agree in seven places (`package.json`, `package-lock.json`, `tauri.conf.json`, `Cargo.toml`, `Cargo.lock`, `app.py`, `src-tauri/src/lib.rs`): run `python scripts/set_version.py 2.0.5`, refresh the What's New list in `index.html` and add a changelog entry below, then push the matching tag (`git tag v2.0.5 && git push origin v2.0.5`). `python scripts/set_version.py --check` verifies the files agree, and `tests/test_release.py` fails the build if they drift — `build.py` reads its version resource from `package.json` and refuses to guess. GitHub Actions then builds signed Windows, Linux, and macOS packages, runs the test suite, publishes the Windows setup, Linux AppImage, macOS DMG and macOS updater archive, and removes stale build files from that release. The updater manifest includes its package signatures, so standalone signature files are not needed in the release downloads.
 
 ### Run from source
 
@@ -127,7 +127,8 @@ The app is intentionally straightforward to edit without generating frontend cod
 | Signed update manifest for GitHub releases | `scripts/create_updater_manifest.py`, `.github/workflows/idlr-app-release.yml` |
 | Worker/FFmpeg bundling and installer signing | `build.py` |
 | App icon shown in the browser | `favicon.svg` |
-| Python tests | `tests/test_app.py` (API), `tests/test_frontend.py` (UI wiring), `tests/test_build.py` (packaging) |
+| Python tests | `tests/test_app.py` (API), `tests/test_frontend.py` (UI wiring), `tests/test_build.py` (packaging), `tests/test_release.py` (version agreement) |
+| Version for a release | `python scripts/set_version.py X.Y.Z` |
 
 For frontend edits, change `index.html` and refresh the browser or restart `npm run tauri -- dev`. `scripts/prepare_frontend.py` copies the HTML and favicon into `frontend-dist/` before a Tauri run or build; edit the source files, not that generated folder. For backend edits, run `python -m unittest discover -s tests` from the project root. To produce a new installer after testing, run `python build.py` on the target OS. User accounts and settings are kept in `~/.idlr_app/`, outside the source tree.
 
@@ -268,6 +269,16 @@ idlr/
 ---
 
 ## 📜 Changelog
+
+### v2.0.5 — stays open, says what is wrong, and feels like Windows
+
+- **Fixed the "IDLR deleted itself" crash.** The old startup ran `pip install`, downloaded FFmpeg, and called `sys.exit(1)` while importing — in a packaged build that killed the bundled worker, and the runtime download/extraction is what antivirus reacts to. Nothing is installed or created at runtime any more; a missing required component is a logged error, and FFmpeg can never block startup.
+- **The window opens even when the download helper is gone.** A quarantined `idlr-worker.exe` no longer aborts the Tauri shell: the app starts, downloads pause, and a banner explains the cause with **Try again** and copyable recovery steps. The helper answers `503` with the real reason instead of dying silently, and is restarted on demand.
+- **Windows-style animated tabs, same layout.** Download/History and the history filters now slide their selection highlight between buttons, with a hover ghost that follows the pointer, a press squash and a click ripple; the desktop sidebar uses the accent-bar treatment. The tabs are a real tablist now, so arrows/Home/End work and focus is visible.
+- **Fewer silent failures.** Trash restore/empty report honest results, the FFmpeg badge no longer says "Built-in" when FFmpeg is missing, and history/accounts writes are locked so two downloads finishing together cannot drop a row.
+- **Memory bounded.** Finished download jobs and per-job console logs are capped, which is what let a long session grow until the worker was killed.
+- **Packaging**: helpers and the installer get real version metadata, UPX is disabled, and `signtool` runs when `IDLR_SIGN_THUMBPRINT` is configured.
+- Added `tests/test_frontend.py`, `tests/test_build.py` and `tests/test_release.py`, and `scripts/set_version.py` so a release cannot ship with a stale version number.
 
 ### v2.0.4 — release test fixes
 

@@ -30,13 +30,22 @@ WORKERS = (("idlr-worker", "download_worker.py"), ("IDLR-spotdl", "spotdl_worker
 
 
 def _version_fields():
-    """Version tuple for the Windows version resource (major,minor,patch,build)."""
+    """Version tuple for the Windows version resource (major,minor,patch,build).
+
+    Read from `package.json`, which `scripts/set_version.py` keeps in step with
+    the Tauri config, the Rust constants and the git tag. There is deliberately
+    no fallback constant here: stamping the exe with whatever version was hard-
+    coded at release time is how a build advertises the update it already
+    installed, so a missing manifest is a build error instead.
+    """
     manifest = ROOT / "package.json"
-    raw = "2.0.4"
     try:
-        raw = str(json.loads(manifest.read_text(encoding="utf-8")).get("version") or raw)
-    except (OSError, ValueError):
-        pass
+        raw = str(json.loads(manifest.read_text(encoding="utf-8"))["version"])
+    except (OSError, ValueError, KeyError) as exc:
+        raise SystemExit(
+            f"build.py: cannot read the version from {manifest} ({exc!r}). "
+            "Run `python scripts/set_version.py X.Y.Z` before packaging."
+        )
     parts = []
     for chunk in str(raw).split(".")[:4]:
         digits = "".join(ch for ch in chunk if ch.isdigit())
