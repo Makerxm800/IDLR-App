@@ -25,8 +25,9 @@ static TEMP_FILE_SEQUENCE: AtomicU64 = AtomicU64::new(0);
 
 struct AppState {
     data_dir: PathBuf,
-    worker: Mutex<Worker>,
+    worker: Mutex<WorkerSlot>,
     browser_url: Mutex<Option<String>>,
+    app: AppHandle,
 }
 
 struct Worker {
@@ -35,6 +36,29 @@ struct Worker {
     output: BufReader<ChildStdout>,
     next_id: u64,
 }
+
+/// The media worker is a helper process, not a reason for IDLR's window to
+/// refuse to open. Antivirus products (Windows Defender especially) love to
+/// quarantine freshly built PyInstaller binaries, and until now a missing
+/// worker made `setup` return an error, Tauri aborted, and `.expect(..)` panicked
+/// — the user just saw an app that appeared to delete itself. Keeping the
+/// worker optional means the UI always opens and can say what is wrong.
+struct WorkerSlot {
+    worker: Option<Worker>,
+    problem: Option<String>,
+    restarts: u32,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct WorkerStatus {
+    ok: bool,
+    problem: Option<String>,
+    restarts: u32,
+    guidance: Option<String>,
+}
+
+const WORKER_GUIDANCE: &str = "If Windows Defender removed IDLR's helper, open Windows Security \u{2192} Virus & threat protection \u{2192} Protection history, allow the IDLR files, then reinstall IDLR. Installing into your own user folder (not a temporary or Program Files folder) and adding an IDLR exclusion keeps this from happening again.";
 
 #[derive(Deserialize)]
 struct WorkerResponse {
@@ -59,7 +83,7 @@ struct AppUpdateStatus {
 }
 
 impl Worker {
-    fn start(app: &tauri::App) -> Result<Self, String> {
+    fn start(app: &AppHandle) -> Result<Self, String> {
         let mut command;
         if cfg!(debug_assertions) {
             let script = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
@@ -84,12 +108,23 @@ impl Worker {
                 .map_err(|error| format!("Could not locate IDLR's download worker: {error}"))?
                 .join("binaries")
                 .join(worker_name);
+            if !worker.is_file() {
+                // The usual reason is a security product quarantining the
+                // freshly installed helper, so name the file in the message.
+                return Err(format!(
+                    "IDLR's download worker is missing: {}",
+                    worker.display()
+                ));
+            }
             command = Command::new(worker);
         }
         command
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
-            .stderr(Stdio::null());
+            // Piped (not null): the worker writes its diagnostics to stderr, and
+            // keeping them makes "it just stopped" diagnosable. A reader thread
+            // below drains the pipe so it can never fill up and stall the worker.
+            .stderr(Stdio::piped());
         #[cfg(windows)]
         {
             use std::os::windows::process::CommandExt;
@@ -106,12 +141,40 @@ impl Worker {
             .stdout
             .take()
             .ok_or("Could not open the download worker output.")?;
+        if let Some(stderr) = child.stderr.take() {
+            let watcher = thread::Builder::new()
+                .name("idlr-worker-stderr".into())
+                .spawn(move || {
+                    let mut reader = BufReader::new(stderr);
+                    let mut line = String::new();
+                    loop {
+                        line.clear();
+                        match reader.read_line(&mut line) {
+                            Ok(0) | Err(_) => break,
+                            Ok(_) => {
+                                let text = line.trim_end();
+                                if !text.is_empty() {
+                                    log::info!("[worker] {text}");
+                                }
+                            }
+                        }
+                    }
+                });
+            // Losing the watcher only costs diagnostics, never correctness.
+            if let Err(error) = watcher {
+                log::warn!("Could not watch IDLR's worker output: {error}");
+            }
+        }
         Ok(Self {
             child,
             input: BufWriter::new(input),
             output: BufReader::new(output),
             next_id: 0,
         })
+    }
+
+    fn is_alive(&mut self) -> bool {
+        matches!(self.child.try_wait(), Ok(None))
     }
 
     fn request(
@@ -162,6 +225,83 @@ impl Drop for Worker {
     fn drop(&mut self) {
         let _ = self.child.kill();
         let _ = self.child.wait();
+    }
+}
+
+impl WorkerSlot {
+    fn start(app: &AppHandle) -> Self {
+        match Worker::start(app) {
+            Ok(worker) => Self {
+                worker: Some(worker),
+                problem: None,
+                restarts: 0,
+            },
+            Err(error) => {
+                log::error!("IDLR's media worker could not start: {error}");
+                Self {
+                    worker: None,
+                    problem: Some(error),
+                    restarts: 0,
+                }
+            }
+        }
+    }
+
+    /// Talk to the worker, restarting it first when it is gone.
+    ///
+    /// A worker that exited (crash, or a security product removing the file
+    /// while IDLR was open) used to leave every later request failing with the
+    /// same "restart IDLR" message. Restarting is cheap and self-heals the app.
+    fn request(
+        &mut self,
+        app: &AppHandle,
+        method: &str,
+        path: &str,
+        body: Option<Value>,
+    ) -> Result<ApiResponse, String> {
+        if let Some(worker) = self.worker.as_mut() {
+            if worker.is_alive() {
+                return worker.request(method, path, body);
+            }
+            log::warn!("IDLR's media worker had exited; starting another one.");
+        }
+        // Drop the dead handle before borrowing self again to replace it.
+        self.worker = None;
+        let worker = Worker::start(app).map_err(|error| {
+            self.problem = Some(error.clone());
+            error
+        })?;
+        self.worker = Some(worker);
+        self.problem = None;
+        self.restarts += 1;
+        self.worker
+            .as_mut()
+            .ok_or("IDLR's media worker is not available.")?
+            .request(method, path, body)
+    }
+
+    fn status(&mut self) -> WorkerStatus {
+        // Probe the child process rather than trusting our own handle: a worker
+        // that exited on its own (or whose file was removed underneath it by a
+        // security product) still sits in the Option, and reporting that as
+        // healthy would hide the very problem the banner exists to explain.
+        let healthy = match self.worker.as_mut() {
+            Some(worker) => worker.is_alive(),
+            None => false,
+        };
+        if !healthy && self.problem.is_none() {
+            self.problem = Some("IDLR's download helper stopped running.".to_string());
+        }
+        WorkerStatus {
+            ok: healthy,
+            problem: self.problem.clone(),
+            restarts: self.restarts,
+            guidance: if healthy {
+                None
+            } else {
+                Some(WORKER_GUIDANCE.to_string())
+            },
+        }
     }
 }
 
@@ -1128,11 +1268,26 @@ fn api_request_for_state(
     if !worker_route {
         return Ok(error_reply(404, "Unknown IDLR command."));
     }
-    let mut worker = state
-        .worker
-        .lock()
-        .map_err(|_| "IDLR's download worker lock was poisoned.".to_string())?;
-    let mut response = worker.request(&method, &url, Some(body))?;
+    let response = {
+        let mut slot = state
+            .worker
+            .lock()
+            .map_err(|_| "IDLR's download worker lock was poisoned.".to_string())?;
+        match slot.request(&state.app, &method, &url, Some(body)) {
+            Ok(response) => response,
+            // A 503 the page can render beats a rejected promise the UI swallows.
+            Err(error) => api_reply(
+                503,
+                json!({
+                    "error": "IDLR's download helper is not running, so downloads are paused. Restarting it usually fixes this — try again in a moment.",
+                    "detail": error,
+                    "code": "worker_unavailable",
+                    "guidance": WORKER_GUIDANCE
+                }),
+            ),
+        }
+    };
+    let mut response = response;
     if route == "/api/info" && response.status == 200 {
         response.body["version"] = json!(APP_VERSION);
         response.body["network"] = state
@@ -1253,6 +1408,40 @@ async fn install_app_update(app: AppHandle) -> Result<String, String> {
     install_app_update_for_app(&app).await
 }
 
+/// Health of the media worker, so the UI can explain a problem instead of
+/// letting downloads fail with a spinner that never moves.
+#[tauri::command]
+fn worker_status(state: State<'_, AppState>) -> Result<WorkerStatus, String> {
+    let mut slot = state
+        .worker
+        .lock()
+        .map_err(|_| "IDLR's download worker lock was poisoned.".to_string())?;
+    Ok(slot.status())
+}
+
+/// Start the media worker again on demand (the "Try again" button).
+#[tauri::command]
+fn retry_worker(state: State<'_, AppState>) -> Result<WorkerStatus, String> {
+    let app = state.app.clone();
+    let mut slot = state
+        .worker
+        .lock()
+        .map_err(|_| "IDLR's download worker lock was poisoned.".to_string())?;
+    slot.worker = None;
+    match Worker::start(&app) {
+        Ok(worker) => {
+            slot.worker = Some(worker);
+            slot.problem = None;
+            slot.restarts += 1;
+            log::info!("IDLR's media worker was restarted.");
+        }
+        Err(error) => {
+            slot.problem = Some(error);
+        }
+    }
+    Ok(slot.status())
+}
+
 pub fn run() {
     tauri::Builder::default()
         .plugin(
@@ -1263,11 +1452,14 @@ pub fn run() {
         .plugin(tauri_plugin_updater::Builder::new().build())
         .setup(|app| {
             let data_dir = app_data_dir().map_err(std::io::Error::other)?;
-            let worker = Worker::start(app).map_err(std::io::Error::other)?;
+            let handle = app.handle().clone();
+            // Never fail the whole app because the helper could not start: that
+            // is what made a Defender quarantine look like a crash.
+            let worker = WorkerSlot::start(&handle);
             let listener = TcpListener::bind(("127.0.0.1", 0)).map_err(std::io::Error::other)?;
             let port = listener.local_addr().map_err(std::io::Error::other)?.port();
             let browser_url = format!("http://127.0.0.1:{port}");
-            let assets = browser_assets_dir(&app.handle()).map_err(std::io::Error::other)?;
+            let assets = browser_assets_dir(&handle).map_err(std::io::Error::other)?;
             if !assets.join("index.html").is_file() {
                 return Err(std::io::Error::other(format!(
                     "IDLR's browser interface is missing: {}",
@@ -1279,8 +1471,9 @@ pub fn run() {
                 data_dir,
                 worker: Mutex::new(worker),
                 browser_url: Mutex::new(Some(browser_url.clone())),
+                app: handle.clone(),
             });
-            let app_handle = app.handle().clone();
+            let app_handle = handle.clone();
             thread::Builder::new()
                 .name("idlr-browser-server".into())
                 .spawn(move || browser_server(app_handle, listener, assets, port))
@@ -1294,7 +1487,9 @@ pub fn run() {
             api_request,
             select_folder,
             check_app_update,
-            install_app_update
+            install_app_update,
+            worker_status,
+            retry_worker
         ])
         .run(tauri::generate_context!())
         .expect("error while building tauri application");

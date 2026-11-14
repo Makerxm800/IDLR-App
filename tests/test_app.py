@@ -4,6 +4,7 @@ import io
 import json
 import os
 import tempfile
+import threading
 import time
 import unittest
 import zipfile
@@ -72,6 +73,147 @@ class IDLRApiTests(unittest.TestCase):
         invalid = self.client.post("/api/validate-save-path", json={"path": blocked_path})
         self.assertEqual(invalid.status_code, 400)
         self.assertIn("Cannot create save folder", invalid.json["error"])
+
+    def test_history_survives_a_truncated_file_and_keeps_a_copy(self):
+        """A half-written history.json used to mean 'no history' with no trace."""
+        self.create_account()
+        idlr._save_hist("idlr-test@example.com", "https://a/1", "One", "", "Video", "1080p", "mp4", "done")
+        with open(self.history_file, "w", encoding="utf-8") as stream:
+            stream.write('[{"user": "idlr-test@example.com", "tit')
+
+        self.assertEqual(self.client.get("/api/history?user=idlr-test@example.com").json, [])
+
+        salvaged = [name for name in os.listdir(self.temp.name) if "history.json.corrupt-" in name]
+        self.assertEqual(len(salvaged), 1, "the unreadable file should be kept for recovery")
+        with open(os.path.join(self.temp.name, salvaged[0]), encoding="utf-8") as stream:
+            self.assertIn('"tit', stream.read())
+
+    def test_concurrent_history_saves_do_not_eat_each_other(self):
+        """Two downloads finishing together used to write the same snapshot twice."""
+        self.create_account()
+        user = "idlr-test@example.com"
+        threads = [threading.Thread(
+            target=idlr._save_hist,
+            args=(user, f"https://race/{index}", f"Race {index}", "", "Video",
+                  "1080p", "mp4", "done")) for index in range(40)]
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join()
+        with open(self.history_file, encoding="utf-8") as stream:
+            stored = json.load(stream)
+        self.assertEqual(len(stored), 40,
+                         f"lost {40 - len(stored)} history rows to a write race")
+
+    def test_history_saves_leave_no_temp_files_behind(self):
+        self.create_account()
+        for index in range(12):
+            idlr._save_hist("idlr-test@example.com", f"https://a/{index}", f"T{index}",
+                            "", "Video", "1080p", "mp4", "done")
+        strays = [name for name in os.listdir(self.temp.name) if name.endswith(".tmp")]
+        self.assertEqual(strays, [])
+        with open(self.history_file, encoding="utf-8") as stream:
+            self.assertEqual(len(json.load(stream)), 12)
+
+    def test_history_is_bounded_but_protected_entries_survive(self):
+        self.create_account()
+        user = "idlr-test@example.com"
+        cap = 60  # a small cap exercises the same trim logic without the wait
+        with mock.patch.object(idlr, "_HISTORY_CAP", cap):
+            for index in range(cap + 40):
+                idlr._save_hist(user, f"https://bulk/{index}", f"Bulk {index}", "",
+                                "Video", "Best (Max Quality)", "mp4", "done")
+            with open(self.history_file, encoding="utf-8") as stream:
+                stored = json.load(stream)
+            self.assertLessEqual(len(stored), cap)
+            self.assertNotIn("https://bulk/0", [entry["url"] for entry in stored])
+
+            # Starred and trashed rows are what the user asked for: keep them,
+            # even though they are the oldest entries in the file.
+            self.client.post("/api/history/star", json={"user": user, "url": stored[0]["url"]})
+            self.client.delete("/api/history/remove", json={"user": user, "url": stored[1]["url"]})
+            for index in range(cap):
+                idlr._save_hist(user, f"https://more/{index}", f"More {index}", "",
+                                "Video", "1080p", "mp4", "done")
+            with open(self.history_file, encoding="utf-8") as stream:
+                after = json.load(stream)
+        urls = {entry["url"] for entry in after}
+        self.assertIn(stored[0]["url"], urls, "a starred download must not be trimmed away")
+        self.assertIn(stored[1]["url"], urls, "a trashed download must not be trimmed away")
+        self.assertLessEqual(len(after), cap + 2)
+
+    def test_job_logs_stay_bounded_without_breaking_the_ui_cursor(self):
+        """Progress lines are capped, but `log_count` must keep counting up —
+        the console polls with a cursor and would otherwise stall or replay."""
+        job = {}
+        with mock.patch.object(idlr, "_JOB_LOG_KEEP", 25):
+            for index in range(60):
+                idlr._log_to(job, {"t": f"line {index}", "c": "dim"})
+        self.assertEqual(len(job["log"]), 25)
+        self.assertEqual(job["log_total"], 60)
+        self.assertEqual(job["log"][-1]["t"], "line 59")
+
+        lines, total = idlr._log_window(job, 58)
+        self.assertEqual([line["t"] for line in lines], ["line 58", "line 59"])
+        self.assertEqual(total, 60)
+        self.assertEqual(idlr._log_window(job, 60)[0], [])
+        # A client that never polled gets everything still retained.
+        self.assertEqual(len(idlr._log_window(job, 0)[0]), 25)
+
+        with mock.patch.dict(idlr._jobs, {"logjob": {
+                "status": "downloading", "progress": 40, "speed": "1 MB/s", "eta": 3,
+                "title": "T", "thumb": "", "done": False, "error": None,
+                "log": job["log"], "log_total": job["log_total"]}}):
+            state = self.client.get("/api/progress-state/logjob?since=58").json
+        self.assertEqual([line["t"] for line in state["logs"]], ["line 58", "line 59"])
+        self.assertEqual(state["log_count"], 60)
+
+    def test_download_jobs_are_pruned_instead_of_piling_up(self):
+        self.create_account()
+        user = "idlr-test@example.com"
+        with (
+            mock.patch.dict(idlr._jobs, {}, clear=True),
+            mock.patch.object(idlr, "_ytdlp_run",
+                              side_effect=lambda job, *a, **k: job.update(
+                                  status="done", progress=100, done=True)),
+        ):
+            for index in range(idlr._JOBS_KEEP + 25):
+                response = self.client.post("/api/download", json={
+                    "url": f"https://example.com/{index}.mp4", "path": self.temp.name,
+                    "user": user, "thumb": False,
+                })
+                self.assertEqual(response.status_code, 200)
+            time.sleep(0.3)
+            self.assertGreater(len(idlr._jobs), idlr._JOBS_KEEP)
+            # Age every finished job past the TTL, then prune as a new job would.
+            long_ago = time.time() - 3600
+            idlr._jobs.update({jid: dict(job, done=True, ended_at=long_ago,
+                                         created_at=long_ago)
+                               for jid, job in idlr._jobs.items()})
+            idlr._prune_jobs()
+            self.assertLessEqual(len(idlr._jobs), idlr._JOBS_KEEP)
+
+    def test_freshly_finished_jobs_are_not_pruned_while_the_ui_reads_them(self):
+        """A job is marked done a moment before its thread stamps `ended_at`.
+
+        Dating that window from 0 made the job look months old and it was dropped
+        while the progress panel was still polling it — the download vanished
+        mid-flight, which reads as "the app is broken".
+        """
+        with mock.patch.dict(idlr._jobs, {}, clear=True):
+            for index in range(idlr._JOBS_KEEP + 30):
+                idlr._jobs[f"recent{index}"] = {"done": True, "ended_at": 0,
+                                                "created_at": time.time(), "log": []}
+            idlr._prune_jobs()
+            self.assertEqual(len(idlr._jobs), idlr._JOBS_KEEP + 30,
+                             "jobs that just finished stay readable, over the cap or not")
+
+            # A burst bigger than the hard ceiling is still bounded.
+            for index in range(400):
+                idlr._jobs[f"burst{index}"] = {"done": True, "ended_at": time.time(),
+                                               "created_at": time.time(), "log": []}
+            idlr._prune_jobs()
+            self.assertLessEqual(len(idlr._jobs), idlr._JOBS_HARD_KEEP + idlr._JOBS_KEEP)
 
     def test_desktop_folder_picker_returns_selection_or_empty_on_cancel(self):
         api = idlr._DesktopApi()

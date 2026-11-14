@@ -79,7 +79,18 @@ Building also requires the target OS's Tauri prerequisites. On Linux, install th
 
 The media worker and Spotify helper are bundled as private app resources. The installed app does not depend on a separately installed Python interpreter.
 
-Manual runs of **Build desktop apps** in GitHub Actions produce native bundles for Windows, Linux and macOS. A version tag builds signed update packages and publishes the installers plus `latest.json` to GitHub Releases. A system FFmpeg is recommended for audio conversion and video merging.
+Manual runs of **Build IDLR App releases** in GitHub Actions produce native bundles for Windows, Linux and macOS. A version tag builds signed update packages and publishes the installers plus `latest.json` to GitHub Releases. A system FFmpeg is recommended for audio conversion and video merging; `build.py` also downloads one at build time and bundles it, so installed builds work with nothing to install afterwards.
+
+### Windows Defender, SmartScreen and "the app disappeared"
+
+IDLR downloads media, and its helpers are unsigned PyInstaller executables. That combination is what antivirus products flag: `Trojans:Win32/Gencio`/`Wacatac`-style *heuristic* detections on the setup, or a quiet quarantine of `idlr-worker.exe` after install — which previously made the app refuse to open at all and look like it had deleted itself. What the project does about it:
+
+- **Nothing is created at runtime.** `build.py` bundles FFmpeg instead of letting `static-ffmpeg` download an `.exe` into the install folder during a session, and IDLR never runs `pip install` from inside a packaged build. Runtime self-modification is the behaviour that most often triggers real-time protection.
+- **The app survives a missing helper.** If `idlr-worker.exe` has been quarantined, IDLR still opens; downloads pause and a banner explains the cause with a **Try again** button (`retry_worker`) and copyable recovery steps.
+- **The build embeds version metadata** (product name, file description, version) for both helpers, and PyInstaller's UPX packing is disabled — a nameless, packed, unsigned PE is far more likely to be flagged.
+- **Signing is wired up but optional.** Set `IDLR_SIGN_THUMBPRINT` (and optionally `IDLR_SIGN_TIMESTAMP_URL`) on a machine with `signtool` and a code-signing certificate, and `build.py` signs the two helpers and the final `*-setup.exe`. A trusted certificate is the only real cure for SmartScreen reputation warnings; reputation also builds with download volume, which is why early releases are flagged more often.
+
+If your copy is being removed: open **Windows Security → Virus & threat protection → Protection history → Allow on device** (or restore the file), then add an exclusion for the IDLR install folder under **Virus & threat protection settings → Exclusions**. Installing to your user profile rather than `C:\Program Files` avoids the separate problem of an app that cannot write next to itself.
 
 ### Signed desktop app updates
 
@@ -113,9 +124,10 @@ The app is intentionally straightforward to edit without generating frontend cod
 | Native desktop commands, local data, and the bundled-worker bridge | `src-tauri/src/lib.rs` |
 | Worker entry points packaged into the app | `download_worker.py`, `spotdl_worker.py` |
 | Native window, bundle metadata, and icon list | `src-tauri/tauri.conf.json` |
-| Signed update manifest for GitHub releases | `scripts/create_updater_manifest.py`, `.github/workflows/desktop-build.yml` |
+| Signed update manifest for GitHub releases | `scripts/create_updater_manifest.py`, `.github/workflows/idlr-app-release.yml` |
+| Worker/FFmpeg bundling and installer signing | `build.py` |
 | App icon shown in the browser | `favicon.svg` |
-| Python tests | `tests/test_app.py` |
+| Python tests | `tests/test_app.py` (API), `tests/test_frontend.py` (UI wiring), `tests/test_build.py` (packaging) |
 
 For frontend edits, change `index.html` and refresh the browser or restart `npm run tauri -- dev`. `scripts/prepare_frontend.py` copies the HTML and favicon into `frontend-dist/` before a Tauri run or build; edit the source files, not that generated folder. For backend edits, run `python -m unittest discover -s tests` from the project root. To produce a new installer after testing, run `python build.py` on the target OS. User accounts and settings are kept in `~/.idlr_app/`, outside the source tree.
 
@@ -247,7 +259,10 @@ idlr/
 | `Permission denied: 'C:\WINDOWS\system32\tmp...tmp'` | Your process temp folder points somewhere Windows blocks (often from launching inside System32 or a broken TEMP var). Fixed: yt-dlp temp is now pinned to a verified-writable dir (`~/.idlr_app/tmp`), preview/metadata calls too. Restart `python app.py` from your normal folder (not System32) and you're set |
 | Toggles “do nothing” | Fixed in v1.1.0 — every toggle now applies instantly + persists. Hard‑refresh (`Ctrl+Shift+R`) if you still see the old UI |
 | Update button seems dead | In Python/browser mode it shows update progress and needs `app.py` running. Packaged desktop builds use newer IDLR releases for bundled updates |
-| Desktop app does not open | Check `~/.idlr_app/idlr.log`; Windows needs the Microsoft Edge WebView2 Runtime, and Linux needs GTK 3 + WebKit2GTK 4.1 |
+| Desktop app does not open | Check `~/.idlr_app/idlr.log` (the desktop worker's own log lines appear there too); Windows needs the Microsoft Edge WebView2 Runtime, and Linux needs GTK 3 + WebKit2GTK 4.1 |
+| App opens but downloads never start | If the helper is missing (usually quarantined), IDLR now shows a banner at the top of the Download tab with **Try again** / **Copy steps** instead of failing silently. Restore the file in Windows Security and reinstall |
+| Everything installed but "✓ FFmpeg" shows "⚠ No FFmpeg" | FFmpeg could not be bundled or downloaded (offline, proxy, antivirus). Audio conversion and video merging need it; install FFmpeg and restart IDLR — the app re-checks before every download, so no reinstall of IDLR is needed |
+| History or favorites look empty | History is saved atomically; if a file was ever truncated by a power loss or a forced kill, the unreadable copy is kept as `~/.idlr_app/history.json.corrupt-<timestamp>` and can be restored by hand |
 | Rename / Delete Account 404 | Fixed in v1.1.0 — backend now implements both endpoints |
 
 ---

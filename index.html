@@ -38,6 +38,9 @@
             --fg4: #2a2a2a;
             --r: 14px;
             --rpill: 999px;
+            /* one easing curve for the whole UI: quick out, soft landing
+               (the Fluent-style motion used by the tab strips and toggles) */
+            --ef: cubic-bezier(.1, .9, .2, 1);
         }
         /* ── themes (Nebula-style: body[data-theme] overrides) ── */
         body[data-theme="light"] {
@@ -633,9 +636,12 @@
             padding: 4px 6px;
             font-size: 7px;
         }
-        /* ── main nav: glass segmented control with sliding pill ──
-           (deliberately different from the history sub-tabs, which use a
-           red-fill active state — here the pill slides behind, text glows) */
+        /* ── Tab strips: Fluent (Windows 11) style selection ──
+           One mechanism drives the top nav and the history sub-tabs: a selection
+           pill that SLIDES between buttons (transform, so it stays smooth), a
+           hover ghost that follows the pointer, a press squash, and a ripple from
+           the click point. In the desktop sidebar the pill turns into the vertical
+           accent bar Windows uses in NavigationView. */
         .topnav {
             display: flex;
             gap: 2px;
@@ -659,34 +665,105 @@
             font-size: 12px;
             font-weight: 500;
             cursor: pointer;
-            transition: color .2s, transform .2s cubic-bezier(.2, .9, .4, 1.1);
+            transition: color .22s var(--ef), background-color .22s var(--ef),
+                        transform .18s var(--ef);
             position: relative;
             z-index: 2;
             white-space: nowrap;
+            /* the ripple needs to be clipped by the button's own rounded rect */
+            overflow: hidden;
+            -webkit-user-select: none;
+            user-select: none;
         }
-        .nav-btn:hover {
-            color: var(--fg);
-            transform: translateY(-1px)
+        .nav-btn:hover { color: var(--fg); }
+        .nav-btn.pressing > .nav-btn-label { transform: scale(.94); }
+        /* Beat the generic button hover/press transforms further down the sheet:
+           in a tab strip the *indicator* moves, not the button, or the label
+           would drift away from the pill it is sitting on. */
+        .topnav .nav-btn,
+        .hist-tabs .hist-tab {
+            transition: color .22s var(--ef), background-color .22s var(--ef),
+                        transform .18s var(--ef);
         }
-        .nav-btn:active { transform: scale(.96); }
+        .topnav .nav-btn:hover,
+        .hist-tabs .hist-tab:hover,
+        .topnav .nav-btn:active,
+        .hist-tabs .hist-tab:active { transform: none; }
+        .nav-btn > .nav-btn-label {
+            display: inline-flex;
+            align-items: center;
+            gap: 7px;
+            transition: transform .18s var(--ef);
+        }
         .nav-btn.active {
             color: var(--red);
             font-weight: 700;
             text-shadow: 0 0 14px var(--redglow);
         }
-        .tab-indicator {
+        /* Shared "sliding selection" element. Size + translate are set from JS;
+           only the transition lives here so the motion is identical everywhere. */
+        .tab-indicator,
+        .hover-ghost,
+        .hist-indicator,
+        .hist-hover {
             position: absolute;
-            top: 4px;
-            bottom: 4px;
             left: 0;
+            top: 0;
             width: 0;
+            height: 0;
+            pointer-events: none;
+            will-change: transform, width, height;
+        }
+        .tab-indicator,
+        .hist-indicator {
+            border-radius: 999px;
+            opacity: 0;
+            transition:
+                transform .42s var(--ef),
+                width .42s var(--ef),
+                height .42s var(--ef),
+                opacity .2s ease;
+        }
+        .tab-strip-ready .tab-indicator,
+        .tab-strip-ready .hist-indicator { opacity: 1; }
+        .tab-indicator {
             background: rgba(255, 255, 255, 0.09);
             border: 1px solid rgba(255, 255, 255, 0.12);
-            border-radius: 999px;
             box-shadow: 0 2px 12px rgba(0, 0, 0, .35), inset 0 1px 0 rgba(255, 255, 255, .08);
-            transition: width .35s cubic-bezier(.2, .9, .4, 1.1), left .35s cubic-bezier(.2, .9, .4, 1.1);
             z-index: 1;
-            pointer-events: none
+        }
+        .hist-indicator {
+            background: linear-gradient(135deg, var(--red), var(--red2));
+            box-shadow: 0 4px 18px var(--redglow);
+            z-index: 1;
+        }
+        /* hover ghost: the faint fill that follows the pointer between buttons */
+        .hover-ghost,
+        .hist-hover {
+            border-radius: 999px;
+            background: rgba(255, 255, 255, .06);
+            opacity: 0;
+            z-index: 0;
+            transition:
+                transform .3s var(--ef),
+                width .3s var(--ef),
+                height .3s var(--ef),
+                opacity .18s ease;
+        }
+        .tab-strip-ready.hover-live .hover-ghost,
+        .tab-strip-ready.hover-live .hist-hover { opacity: 1; }
+        /* click ripple, spawned at the pointer and removed when it ends */
+        .tab-ripple {
+            position: absolute;
+            border-radius: 50%;
+            transform: translate(-50%, -50%) scale(0);
+            background: radial-gradient(circle, var(--redglow) 0%, rgba(255, 255, 255, .18) 60%, transparent 70%);
+            animation: tabRipple .5s var(--ef) forwards;
+            pointer-events: none;
+            z-index: 1;
+        }
+        @keyframes tabRipple {
+            to { transform: translate(-50%, -50%) scale(1); opacity: 0; }
         }
         body[data-theme="light"] .topnav {
             background: rgba(20, 30, 60, 0.05);
@@ -696,6 +773,10 @@
             background: #ffffff;
             border-color: rgba(20, 30, 60, 0.1);
             box-shadow: 0 2px 10px rgba(20, 30, 60, .15);
+        }
+        body[data-theme="light"] .hover-ghost,
+        body[data-theme="light"] .hist-hover {
+            background: rgba(20, 30, 60, .06);
         }
 
         /* ── Icon Buttons & Tooltips ── */
@@ -1222,6 +1303,69 @@
             border-color: rgba(20, 30, 60, 0.08);
         }
 
+        /* ── health banner (helper missing / engine problems) ── */
+        .health-banner {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            margin: 0 auto 16px;
+            max-width: 1040px;
+            padding: 12px 14px;
+            border: 1px solid rgba(255, 200, 40, .34);
+            border-radius: 14px;
+            background: linear-gradient(135deg, rgba(255, 200, 40, .12), rgba(255, 32, 32, .07));
+            box-shadow: 0 10px 30px rgba(0, 0, 0, .18);
+            animation: healthIn .4s cubic-bezier(.1, .9, .2, 1);
+        }
+        .health-banner[hidden] { display: none; }
+        @keyframes healthIn {
+            from { opacity: 0; transform: translateY(-8px) }
+            to { opacity: 1; transform: none }
+        }
+        .health-icon {
+            font-size: 18px;
+            line-height: 1;
+            flex-shrink: 0;
+        }
+        .health-copy { flex: 1; min-width: 0; }
+        .health-copy strong {
+            display: block;
+            font-size: 12.5px;
+            font-weight: 700;
+        }
+        .health-copy p {
+            margin: 3px 0 0;
+            font-size: 11px;
+            line-height: 1.5;
+            color: var(--fg2);
+            overflow-wrap: anywhere;
+        }
+        .health-btn {
+            flex-shrink: 0;
+            padding: 8px 13px;
+            border: 1px solid rgba(255, 200, 40, .4);
+            border-radius: 10px;
+            background: rgba(255, 200, 40, .14);
+            color: var(--fg);
+            font-family: inherit;
+            font-size: 11px;
+            font-weight: 700;
+            cursor: pointer;
+            transition: background-color .2s var(--ef), transform .18s var(--ef);
+        }
+        .health-btn:hover { background: rgba(255, 200, 40, .24); }
+        .health-btn:active { transform: scale(.96); }
+        .health-btn.ghost {
+            background: transparent;
+            border-color: var(--bdr2);
+            color: var(--fg2);
+            font-weight: 500;
+        }
+        @media (max-width: 640px) {
+            .health-banner { flex-wrap: wrap; }
+            .health-copy { flex-basis: 100%; }
+        }
+
         /* ── pages ── */
         .pages {
             flex: 1;
@@ -1235,14 +1379,46 @@
             padding: 24px;
             display: none
         }
+        /* Directional enter, like a Windows pivot: content slides in from the
+           side you came from and settles (translate is composited, so it stays
+           smooth while the list is long). */
         .page.on {
             display: block;
-            animation: pageFade .35s cubic-bezier(.2, .9, .4, 1.1)
+            animation: pageFade .34s cubic-bezier(.1, .9, .2, 1)
+        }
+        .page.on[data-dir="back"] {
+            animation-name: pageFadeBack;
         }
         @keyframes pageFade {
             from {
                 opacity: 0;
-                transform: translateX(12px)
+                transform: translateX(18px) scale(.995)
+            }
+            to {
+                opacity: 1;
+                transform: none
+            }
+        }
+        @keyframes pageFadeBack {
+            from {
+                opacity: 0;
+                transform: translateX(-18px) scale(.995)
+            }
+            to {
+                opacity: 1;
+                transform: none
+            }
+        }
+        body.desktop-shell .page.on {
+            animation-name: pageRise;
+        }
+        body.desktop-shell .page.on[data-dir="back"] {
+            animation-name: pageRise;
+        }
+        @keyframes pageRise {
+            from {
+                opacity: 0;
+                transform: translateY(14px)
             }
             to {
                 opacity: 1;
@@ -1251,6 +1427,7 @@
         }
         .footer-bar {
             flex-shrink: 0;
+
             background: rgba(10, 10, 10, 0.5);
             backdrop-filter: blur(12px);
             border-top: 1px solid rgba(255, 255, 255, 0.06);
@@ -1939,6 +2116,7 @@
         }
         /* ── history sub-tabs (Files / Favorites / Recent / Trash) ── */
         .hist-tabs {
+            position: relative;
             display: grid;
             grid-template-columns: repeat(4, minmax(0, 1fr));
             align-items: center;
@@ -1964,20 +2142,25 @@
             font-size: 12px;
             font-weight: 600;
             cursor: pointer;
-            transition: all .22s cubic-bezier(.2, .9, .4, 1.1);
+            transition: color .22s var(--ef), transform .18s var(--ef);
             white-space: nowrap;
+            position: relative;
+            z-index: 2;
+            overflow: hidden;
         }
-        .hist-tab:hover {
-            background: rgba(255, 255, 255, 0.07);
-            color: var(--fg);
-            transform: translateY(-1px);
+        .hist-tab > .hist-tab-inner {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            gap: 6px;
+            transition: transform .18s var(--ef);
         }
-        .hist-tab:active { transform: scale(.96); }
-        .hist-tab.active {
-            background: linear-gradient(135deg, var(--red), var(--red2));
-            color: #fff;
-            box-shadow: 0 4px 18px var(--redglow);
-        }
+        .hist-tab:hover { color: var(--fg); }
+        .hist-tab.pressing > .hist-tab-inner { transform: scale(.94); }
+        /* the red fill is the sliding .hist-indicator, not a background swap,
+           so switching tabs is a movement instead of a jump-cut */
+        .hist-tab.active { color: #fff; }
+        .hist-tab.active .hist-tab-cnt { background: rgba(255, 255, 255, .22); color: #fff; }
         .hist-tab-cnt {
             font-family: 'DM Mono', monospace;
             font-size: 10px;
@@ -3315,6 +3498,14 @@
             color: var(--grn);
             border: 1px solid rgba(30, 215, 96, .2)
         }
+        /* a real warning state, so 'no FFmpeg' does not look like a pass */
+        .badge-warn {
+            background: rgba(255, 200, 40, .12);
+            color: #e8b425;
+            border-color: rgba(255, 200, 40, .28);
+            transition: background-color .2s var(--ef), color .2s var(--ef);
+        }
+        .badge-ok { transition: background-color .2s var(--ef), color .2s var(--ef); }
 
         /* ── About modal scrollable list ── */
         .about-legal-list {
@@ -3596,21 +3787,41 @@
             padding: 6px;
             border-radius: 16px;
             background: transparent;
-            border-color: transparent;
+            border: 0;
         }
         body.desktop-shell .nav-btn {
             justify-content: flex-start;
             min-height: 44px;
-            padding: 0 14px;
+            padding: 0 14px 0 20px;
             border-radius: 12px;
             font-size: 13px;
         }
         body.desktop-shell .nav-btn:hover { transform: none; }
+        /* the row fades its own fill in; the accent bar below does the moving */
         body.desktop-shell .nav-btn.active {
             color: var(--fg);
+            font-weight: 700;
             background: var(--redsoft);
         }
-        body.desktop-shell .tab-indicator { display: none; }
+        /* Windows 11 NavigationView: a short accent bar rides up and down the
+           selected row. Size/position come from the tab-strip JS. */
+        body.desktop-shell .tab-indicator {
+            top: 0;
+            left: 0;
+            width: 3px;
+            height: 18px;
+            border: 0;
+            border-radius: 0 3px 3px 0;
+            background: linear-gradient(180deg, var(--red), var(--red2));
+            box-shadow: 0 0 12px var(--redglow);
+        }
+        body.desktop-shell .hover-ghost {
+            border-radius: 12px;
+            background: var(--s3);
+        }
+        body.desktop-shell .nav-btn.pressing > .nav-btn-label {
+            transform: scale(.97);
+        }
         body.desktop-shell .topbar > div:last-child {
             width: 100%;
             margin: auto 0 0 !important;
@@ -3819,21 +4030,36 @@
         }
         .hist-tab:hover {
             color: var(--fg);
-            background: var(--s3);
-            transform: translateY(-1px);
+            background: transparent;
+            transform: none;
         }
+        /* the moving .hist-indicator carries the fill + inset ring, so the
+           active state no longer needs a background of its own */
         .hist-tab.active {
             color: var(--fg);
+            background: transparent;
+            border-color: transparent;
+            box-shadow: none;
+        }
+        .hist-tab.active .hist-tab-label { font-weight: 700; }
+        .hist-indicator {
             background: var(--redsoft);
-            border-color: var(--redglow);
             box-shadow: inset 0 0 0 1px var(--redglow);
         }
+        .tab-indicator {
+            background: var(--s3);
+            border-color: var(--bdr2);
+            box-shadow: 0 2px 12px rgba(0, 0, 0, .18);
+        }
+        .hover-ghost,
+        .hist-hover { background: var(--s3); }
         .hist-tab-cnt {
             min-width: 22px;
             padding: 3px 7px;
             background: var(--s4);
             color: var(--fg2);
             line-height: 1.2;
+            transition: background-color .3s var(--ef), color .3s var(--ef);
         }
         .hist-tab.active .hist-tab-cnt {
             background: var(--red);
@@ -4300,8 +4526,16 @@
                 <h3>🎉 What's New — v2.0.4</h3>
                 <div class="whatsnew-list">
                     <div class="whatsnew-item">
-                        <span class="icon">🛠️</span>
-                        <span class="text"><strong>More reliable releases</strong> — platform builds now run the test suite before packaging, and release version tests stay aligned automatically.</span>
+                        <span class="icon">🪟</span>
+                        <span class="text"><strong>Animated tabs</strong> — Download/History and the history filters now slide their selection highlight between buttons, with hover, press and click feedback that follows the pointer.</span>
+                    </div>
+                    <div class="whatsnew-item">
+                        <span class="icon">🧯</span>
+                        <span class="text"><strong>Fewer silent failures</strong> — IDLR now opens even when FFmpeg or the download helper is unavailable, and tells you what is missing instead of sitting there with a frozen spinner.</span>
+                    </div>
+                    <div class="whatsnew-item">
+                        <span class="icon">🛡️</span>
+                        <span class="text"><strong>Recovery help</strong> — if Windows Defender quarantines IDLR's helper, a banner explains how to restore it and retry, and the keyboard can drive the tabs (← → Home End).</span>
                     </div>
                 </div>
                 <button class="btn-red" onclick="closeWhatsNew()" style="margin-top:4px">Got it!</button>
@@ -4318,10 +4552,15 @@
                         <div class="tbar-name-full">Internet Downloader</div>
                     </div>
                 </div>
-                <nav class="topnav" id="topnav">
-                    <button class="nav-btn active" data-tab="dl" aria-current="page" onclick="gotoTab('dl')">⬇ Download</button>
-                    <button class="nav-btn" data-tab="hist" aria-current="false" onclick="gotoTab('hist')">🕘 History</button>
-                    <div class="tab-indicator" id="tab-indicator"></div>
+                <nav class="topnav" id="topnav" role="tablist" aria-label="IDLR sections">
+                    <span class="hover-ghost" id="topnav-hover" aria-hidden="true"></span>
+                    <div class="tab-indicator" id="tab-indicator" aria-hidden="true"></div>
+                    <button class="nav-btn active" data-tab="dl" role="tab" id="tab-dl"
+                            aria-selected="true" aria-controls="page-dl" tabindex="0"
+                            onclick="gotoTab('dl')"><span class="nav-btn-label">⬇ Download</span></button>
+                    <button class="nav-btn" data-tab="hist" role="tab" id="tab-hist"
+                            aria-selected="false" aria-controls="page-hist" tabindex="-1"
+                            onclick="gotoTab('hist')"><span class="nav-btn-label">🕘 History</span></button>
                 </nav>
                 <div style="display:flex;align-items:center;gap:8px;margin-left:auto">
                     <!-- Notification Bell -->
@@ -4496,7 +4735,19 @@
 
             <div class="pages">
                 <!-- ── DOWNLOAD ── -->
-                <div class="page on" id="page-dl">
+                <div class="page on" id="page-dl" role="tabpanel" aria-labelledby="tab-dl">
+                    <!-- Shown only when something IDLR needs is missing (the usual
+                         cause is a security product quarantining the helper). -->
+                    <div class="health-banner" id="health-banner" role="status" hidden>
+                        <span class="health-icon" aria-hidden="true">🛡️</span>
+                        <div class="health-copy">
+                            <strong id="health-title">IDLR's download helper is not running</strong>
+                            <p id="health-detail">Downloads are paused until it starts again.</p>
+                        </div>
+                        <button class="health-btn" type="button" onclick="retryHealth()">Try again</button>
+                        <button class="health-btn ghost" type="button" onclick="copyHealthFix()" title="Copy the steps to restore IDLR's files">Copy steps</button>
+                    </div>
+
                     <div class="dl-hero">
                         <div class="hero-title">
                             <span class="hw hw1">Download</span><span class="hw hw2"> Anything.</span><br/>
@@ -4610,7 +4861,7 @@
                 </div>
 
                 <!-- ── HISTORY ── -->
-                <div class="page" id="page-hist">
+                <div class="page" id="page-hist" role="tabpanel" aria-labelledby="tab-hist">
                     <div class="hist-header">
                         <div class="hist-heading-copy">
                             <h2>📋 Download History</h2>
@@ -4628,10 +4879,12 @@
                         </div>
                     </div>
                     <div class="hist-tabs" id="hist-tabs" role="tablist" aria-label="Download history filters">
-                        <button class="hist-tab active" data-htab="files" role="tab" aria-selected="true" onclick="setHistTab('files')" title="All downloads"><span class="hist-tab-label">📁 Files</span><span class="hist-tab-cnt" id="cnt-files"></span></button>
-                        <button class="hist-tab" data-htab="fav" role="tab" aria-selected="false" onclick="setHistTab('fav')" title="Starred downloads — tap ★ on any row to pin it here"><span class="hist-tab-label">★ Favorites</span><span class="hist-tab-cnt" id="cnt-fav"></span></button>
-                        <button class="hist-tab" data-htab="recent" role="tab" aria-selected="false" onclick="setHistTab('recent')" title="Downloads from the last 7 days"><span class="hist-tab-label">🕘 Recent</span><span class="hist-tab-cnt" id="cnt-recent"></span></button>
-                        <button class="hist-tab" data-htab="trash" role="tab" aria-selected="false" onclick="setHistTab('trash')" title="Deleted items — restore them or empty the trash"><span class="hist-tab-label">🗑 Trash</span><span class="hist-tab-cnt" id="cnt-trash"></span></button>
+                        <span class="hist-hover" id="hist-hover" aria-hidden="true"></span>
+                        <span class="hist-indicator" id="hist-indicator" aria-hidden="true"></span>
+                        <button class="hist-tab active" data-htab="files" role="tab" id="htab-files" aria-selected="true" aria-controls="hist-list" tabindex="0" onclick="setHistTab('files')" title="All downloads"><span class="hist-tab-inner"><span class="hist-tab-label">📁 Files</span><span class="hist-tab-cnt" id="cnt-files"></span></span></button>
+                        <button class="hist-tab" data-htab="fav" role="tab" id="htab-fav" aria-selected="false" aria-controls="hist-list" tabindex="-1" onclick="setHistTab('fav')" title="Starred downloads — tap ★ on any row to pin it here"><span class="hist-tab-inner"><span class="hist-tab-label">★ Favorites</span><span class="hist-tab-cnt" id="cnt-fav"></span></span></button>
+                        <button class="hist-tab" data-htab="recent" role="tab" id="htab-recent" aria-selected="false" aria-controls="hist-list" tabindex="-1" onclick="setHistTab('recent')" title="Downloads from the last 7 days"><span class="hist-tab-inner"><span class="hist-tab-label">🕘 Recent</span><span class="hist-tab-cnt" id="cnt-recent"></span></span></button>
+                        <button class="hist-tab" data-htab="trash" role="tab" id="htab-trash" aria-selected="false" aria-controls="hist-list" tabindex="-1" onclick="setHistTab('trash')" title="Deleted items — restore them or empty the trash"><span class="hist-tab-inner"><span class="hist-tab-label">🗑 Trash</span><span class="hist-tab-cnt" id="cnt-trash"></span></span></button>
                     </div>
                     <div class="hist-bulk-bar" id="hist-bulk-bar">
                         <div class="bulk-count" id="bulk-count">0 selected</div>
@@ -4768,6 +5021,7 @@
                         </div>
                         <div class="setting-row-right">
                             <span class="badge-ok" id="sp-ffmpeg">✓ FFmpeg</span>
+                            <span class="badge-ok" id="sp-spotify-engine">♫ spotdl</span>
                         </div>
                     </div>
                     <div class="setting-row" style="cursor:default">
@@ -5188,34 +5442,329 @@
                 bg.classList.remove('closing'); if (m) m.classList.remove('closing'); }, 250);
         }
 
-        /* ══ TAB INDICATOR ══ */
+        /* ══ ENGINE HEALTH ══
+           IDLR keeps its window open even when the download helper cannot
+           start — a quarantined helper used to take the whole app down, which
+           looked like "the app deleted itself". So say what is missing, offer a
+           retry, and hand over the exact recovery steps. */
+        let _healthDetail = '';
+
+        function setHealthBanner(title, detail) {
+            const banner = document.getElementById('health-banner');
+            if (!banner) return;
+            if (!title) {
+                banner.hidden = true;
+                return;
+            }
+            _healthDetail = [title, detail || ''].filter(Boolean).join('\n\n');
+            document.getElementById('health-title').textContent = title;
+            document.getElementById('health-detail').textContent = detail
+                || 'Downloads are paused until it starts again.';
+            banner.hidden = false;
+        }
+
+        async function checkEngineHealth() {
+            const invoke = window.__TAURI__?.core?.invoke;
+            if (!invoke) return;                       // browser/dev mode has no helper
+            try {
+                const status = await invoke('worker_status');
+                if (status && !status.ok) {
+                    setHealthBanner("IDLR's download helper is not running",
+                        [status.problem, status.guidance].filter(Boolean).join(' '));
+                    return;
+                }
+            } catch (e) {
+                // An older installed build without the command: nothing to report.
+                return;
+            }
+            setHealthBanner('');
+        }
+
+        async function retryHealth() {
+            const invoke = window.__TAURI__?.core?.invoke;
+            if (!invoke) {
+                // Browser mode has no helper process to revive: re-read /api/info,
+                // which re-probes FFmpeg and rebuilds the badges + banner.
+                try { await loadInfo(); toast('Checked again', 'info'); }
+                catch (e) { toast('IDLR is not responding yet', 'err'); }
+                return;
+            }
+            toast('Restarting the download helper…', 'info');
+            try {
+                const status = await invoke('retry_worker');
+                if (status && status.ok) {
+                    setHealthBanner('');
+                    toast('Download helper is running ✓', 'ok');
+                } else {
+                    setHealthBanner("IDLR's download helper is still not running",
+                        [status && status.problem, status && status.guidance]
+                            .filter(Boolean).join(' '));
+                    toast('Could not start the helper', 'err');
+                }
+            } catch (e) {
+                toast('Could not reach IDLR to retry', 'err');
+            }
+        }
+
+        function copyHealthFix() {
+            const text = _healthDetail || "IDLR's download helper is missing. Restore it from Windows Security → Virus & threat protection → Protection history, then reinstall IDLR into your own user folder.";
+            try {
+                navigator.clipboard.writeText(text).then(
+                    () => toast('Recovery steps copied ✓', 'ok'),
+                    () => toast('Copy failed — select the text instead', 'err')
+                );
+            } catch (e) {
+                toast('Copy is not available here', 'err');
+            }
+        }
+
+        /* ══ TAB STRIPS — animated selection (Fluent / Windows 11 style) ══
+           One small helper drives both tab groups:
+           • the active pill is a single element moved with a transform, so
+             switching tabs is a slide rather than a background jump-cut;
+           • a faint ghost follows the pointer between buttons (hidden for
+             touch, where there is no hover);
+           • pressing squashes the label, releasing runs a ripple from the
+             exact click point;
+           • ←/→ (and ↑/↓ in the desktop sidebar) move between tabs like a real
+             tablist, which also makes the buttons keyboard-reachable.
+           body.reduce-motion collapses every duration, so nothing extra runs
+           for people who asked for less animation. */
+        const _tabStrips = {};
+
+        function _prefersLessMotion() {
+            try {
+                return document.body.classList.contains('reduce-motion')
+                    || window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+            } catch (e) { return false; }
+        }
+
+        function _rectInside(container, target) {
+            const cr = container.getBoundingClientRect();
+            const tr = target.getBoundingClientRect();
+            const cs = getComputedStyle(container);
+            // Absolutely positioned children are measured from the container's
+            // padding box, so subtract its border to line up exactly.
+            const ox = cr.left + (parseFloat(cs.borderLeftWidth) || 0);
+            const oy = cr.top + (parseFloat(cs.borderTopWidth) || 0);
+            return { x: tr.left - ox, y: tr.top - oy, w: tr.width, h: tr.height };
+        }
+
+        function _placeStripEl(el, rect) {
+            if (!el) return;
+            el.style.width = Math.max(0, Math.round(rect.w)) + 'px';
+            el.style.height = Math.max(0, Math.round(rect.h)) + 'px';
+            el.style.transform = `translate(${Math.round(rect.x)}px, ${Math.round(rect.y)}px)`;
+        }
+
+        /* Accent-bar mode: the small vertical bar Windows parks just inside the
+           left edge of the selected sidebar row. */
+        function _barRect(container, btn) {
+            const outer = _rectInside(container, btn);
+            const height = 18;
+            return {
+                x: outer.x + 3,
+                y: outer.y + Math.round((outer.h - height) / 2),
+                w: 3,
+                h: height
+            };
+        }
+
+        function _moveStrip(strip, button) {
+            if (!strip || !button || !strip.container.contains(button)) return;
+            const vertical = strip.vertical();
+            strip.container.classList.add('tab-strip-ready');
+            if (strip.indicator) {
+                _placeStripEl(strip.indicator, vertical
+                    ? _barRect(strip.container, button)
+                    : _rectInside(strip.container, button));
+            }
+        }
+
+        function _moveHoverGhost(strip, button) {
+            if (!strip || !strip.hover || !button || !strip.container.contains(button)) return;
+            strip.container.classList.add('tab-strip-ready', 'hover-live');
+            _placeStripEl(strip.hover, _rectInside(strip.container, button));
+        }
+
+        function registerTabStrip(name, options) {
+            const container = document.getElementById(options.containerId);
+            if (!container) return null;
+            const strip = {
+                name,
+                container,
+                selector: options.selector,
+                indicator: document.getElementById(options.indicatorId || ''),
+                hover: document.getElementById(options.hoverId || ''),
+                vertical: options.vertical || function () { return false; },
+            };
+            _tabStrips[name] = strip;
+
+            container.addEventListener('pointerover', event => {
+                if (event.pointerType === 'touch') return;
+                const btn = event.target.closest(strip.selector);
+                if (btn && container.contains(btn)) _moveHoverGhost(strip, btn);
+            });
+            container.addEventListener('pointerleave', () => container.classList.remove('hover-live'));
+            container.addEventListener('pointerdown', event => {
+                const btn = event.target.closest(strip.selector);
+                if (!btn) return;
+                btn.classList.add('pressing');
+                // The pointer can be released outside the strip; clear the press
+                // state either way so a tab never stays visually half-pressed.
+                const done = () => {
+                    btn.classList.remove('pressing');
+                    document.removeEventListener('pointerup', done);
+                    document.removeEventListener('pointercancel', done);
+                };
+                document.addEventListener('pointerup', done);
+                document.addEventListener('pointercancel', done);
+            });
+            const release = event => {
+                container.querySelectorAll(strip.selector + '.pressing')
+                    .forEach(btn => btn.classList.remove('pressing'));
+                if (!event || event.pointerType === 'touch' || _prefersLessMotion()) return;
+                const btn = event.target.closest ? event.target.closest(strip.selector) : null;
+                if (!btn || !container.contains(btn)) return;
+                _spawnRipple(strip, btn, event);
+            };
+            container.addEventListener('pointerup', release);
+            container.addEventListener('pointercancel', () => {
+                container.querySelectorAll(strip.selector + '.pressing')
+                    .forEach(btn => btn.classList.remove('pressing'));
+            });
+            return strip;
+        }
+
+        function _spawnRipple(strip, btn, event) {
+            const rect = btn.getBoundingClientRect();
+            const size = Math.max(rect.width, rect.height) * 2.2;
+            const ripple = document.createElement('span');
+            ripple.className = 'tab-ripple';
+            ripple.setAttribute('aria-hidden', 'true');
+            const originX = (typeof event.clientX === 'number' && event.clientX)
+                ? event.clientX - rect.left : rect.width / 2;
+            const originY = (typeof event.clientY === 'number' && event.clientY)
+                ? event.clientY - rect.top : rect.height / 2;
+            ripple.style.left = originX + 'px';
+            ripple.style.top = originY + 'px';
+            ripple.style.width = size + 'px';
+            ripple.style.height = size + 'px';
+            btn.appendChild(ripple);
+            setTimeout(() => ripple.remove(), 520);
+        }
+
+        /* Keyboard: a tablist should move with the arrow keys and wrap at the
+           ends, like the native Windows controls do. */
+        function bindTabKeys(stripName, containerId, selector, activate) {
+            const container = document.getElementById(containerId);
+            if (!container) return;
+            container.addEventListener('keydown', event => {
+                const key = event.key;
+                const vertical = document.body.classList.contains('desktop-shell')
+                    && stripName === 'main';
+                const next = key === 'ArrowRight' || (vertical && key === 'ArrowDown') ? 1
+                    : key === 'ArrowLeft' || (vertical && key === 'ArrowUp') ? -1
+                    : key === 'Home' ? 'first' : key === 'End' ? 'last' : 0;
+                if (!next) return;
+                const tabs = Array.prototype.slice.call(container.querySelectorAll(selector));
+                if (!tabs.length) return;
+                // Usually the focused button is the reference; when focus is on
+                // the strip itself (e.g. after a click on a wrapper) fall back to
+                // the active tab, so the arrows still walk the list.
+                const focused = tabs.indexOf(document.activeElement);
+                const base = focused >= 0 ? focused
+                    : Math.max(0, tabs.findIndex(t => t.classList.contains('active')));
+                event.preventDefault();
+                let index;
+                if (next === 'first') index = 0;
+                else if (next === 'last') index = tabs.length - 1;
+                else index = (base + next + tabs.length) % tabs.length;
+                const target = tabs[index];
+                if (!target) return;
+                tabs.forEach(tab => tab.setAttribute('tabindex', '-1'));
+                target.setAttribute('tabindex', '0');
+                target.focus();
+                _moveStrip(_tabStrips[stripName], target);
+                // Keyboard moves update the live "hovered" target too, so the
+                // ghost does not sit on the tab you just left.
+                if (container.classList.contains('hover-live')) {
+                    _moveHoverGhost(_tabStrips[stripName], target);
+                }
+                activate(target.dataset.tab || target.dataset.htab);
+            });
+        }
+
         function updateTabIndicator(tabId) {
-            const btn = document.querySelector(`.nav-btn[data-tab="${tabId}"]`);
-            const ind = document.getElementById('tab-indicator');
-            const nav = document.getElementById('topnav');
-            if (!btn || !ind || !nav) return;
-            setTimeout(() => {
-                const br = btn.getBoundingClientRect();
-                const nr = nav.getBoundingClientRect();
-                ind.style.width = br.width + 'px';
-                ind.style.left = (br.left - nr.left) + 'px';
-            }, 10);
+            const strip = _tabStrips.main;
+            if (!strip) return;
+            const btn = tabId
+                ? strip.container.querySelector(`.nav-btn[data-tab="${tabId}"]`)
+                : strip.container.querySelector('.nav-btn.active');
+            if (!btn) return;
+            // Measure after layout settles so webfonts / sidebar resize cannot
+            // leave the pill one frame out of date.
+            requestAnimationFrame(() => _moveStrip(strip, btn));
+        }
+
+        function updateHistIndicator() {
+            const strip = _tabStrips.hist;
+            if (!strip) return;
+            const btn = strip.container.querySelector('.hist-tab.active')
+                || strip.container.querySelector('.hist-tab');
+            if (!btn) return;
+            requestAnimationFrame(() => _moveStrip(strip, btn));
+        }
+
+        /* Re-measure when the window (or a sidebar) changes size, and once the
+           webfonts have loaded — otherwise the pill is the wrong width until the
+           next click. */
+        function _bindStripRelayout() {
+            const relayout = () => {
+                updateTabIndicator();
+                updateHistIndicator();
+            };
+            window.addEventListener('resize', relayout);
+            if (window.ResizeObserver) {
+                const observer = new ResizeObserver(relayout);
+                ['topnav', 'hist-tabs'].forEach(id => {
+                    const el = document.getElementById(id);
+                    if (el) observer.observe(el);
+                });
+            }
+            if (document.fonts && document.fonts.ready) {
+                document.fonts.ready.then(relayout).catch(() => {});
+            }
         }
 
         /* ══ TABS ══ */
+        const _tabOrder = ['dl', 'hist'];
+
         function gotoTab(n) {
-            ['dl', 'hist'].forEach(t => {
+            const from = _tabOrder.indexOf(typeof gotoTab.current === 'string' ? gotoTab.current : '');
+            const to = _tabOrder.indexOf(n);
+            const backwards = from >= 0 && to >= 0 && to < from;
+            gotoTab.current = n;
+            _tabOrder.forEach(t => {
                 const b = document.querySelector(`.nav-btn[data-tab="${t}"]`);
-                    if (b) {
-                        b.className = 'nav-btn' + (t === n ? ' active' : '');
-                        b.setAttribute('aria-current', t === n ? 'page' : 'false');
-                    }
+                if (b) {
+                    const active = t === n;
+                    // classList, not className: overwriting the attribute would
+                    // also erase transient state like the `.pressing` press class.
+                    b.classList.toggle('active', active);
+                    b.setAttribute('aria-selected', active ? 'true' : 'false');
+                    b.setAttribute('tabindex', active ? '0' : '-1');
+                }
                 const p = document.getElementById('page-' + t);
-                if (p) p.className = 'page' + (t === n ? ' on' : '');
+                if (p) {
+                    p.classList.toggle('on', t === n);
+                    if (t === n) p.dataset.dir = backwards ? 'back' : 'forward';
+                }
             });
             updateTabIndicator(n);
             if (n === 'hist') { loadHist(); }
         }
+        gotoTab.current = 'dl';
 
         /* ══ MODALS (existing) ══ */
         function showModal(t) {
@@ -5621,6 +6170,7 @@
             }
             try { updatePathDisplay(); } catch (e) {}
             setTimeout(() => updateTabIndicator('dl'), 50);
+            setTimeout(() => { try { checkEngineHealth(); } catch (e) {} }, 800);
             loadInfo();
             hideLoading();
             if (!isRestore) {
@@ -6111,6 +6661,9 @@
                 if (si) si.className = 'site-icon';
                 setStat(error.message || 'Could not reach the IDLR server.', 'red');
                 toast(error.message || 'Could not reach the IDLR server.', 'err');
+                // A dead helper is the usual reason — surface it with a fix
+                // instead of leaving a red line in the console log.
+                try { checkEngineHealth(); } catch (e2) {}
             }
         }
 
@@ -6247,7 +6800,9 @@
                     const active = b.dataset.htab === t;
                     b.classList.toggle('active', active);
                     b.setAttribute('aria-selected', String(active));
+                    b.setAttribute('tabindex', active ? '0' : '-1');
                 });
+            updateHistIndicator();
             const inTrash = t === 'trash';
             const show = (id, v) => { const el = document.getElementById(id); if (el) el.style.display = v ? '' : 'none'; };
             show('select-toggle-btn', !inTrash);
@@ -6509,20 +7064,30 @@
             const trashed = _histItems.filter(i => isTrashed(i));
             if (!trashed.length) { toast('Trash is already empty', ''); return; }
             if (!confirm(`Permanently delete ${trashed.length} trashed item(s)? This cannot be undone.`)) return;
-            await fetch('/api/history/empty-trash?user=' + encodeURIComponent(U.email), { method: 'DELETE' });
-            toast('Trash emptied', 'ok');
-            loadHist();
+            // No try/catch here used to mean a failed request left the button
+            // dead with no message at all.
+            try {
+                const r = await fetch('/api/history/empty-trash?user=' + encodeURIComponent(U.email), { method: 'DELETE' });
+                if (!r.ok) throw new Error('request rejected');
+                toast('Trash emptied', 'ok');
+                loadHist();
+            } catch (e) { toast('Could not empty the trash — try again', 'err'); }
         }
 
         async function restoreAllTrash() {
             const trashed = _histItems.filter(i => isTrashed(i) && i.url);
             if (!trashed.length) { toast('Trash is already empty', ''); return; }
-            for (const item of trashed) {
-                await fetch('/api/history/restore', { method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ user: U.email, url: item.url }) });
-            }
-            toast(`Restored ${trashed.length} item(s) ✓`, 'ok');
+            try {
+                let restored = 0;
+                for (const item of trashed) {
+                    const r = await fetch('/api/history/restore', { method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ user: U.email, url: item.url }) });
+                    if (r.ok) restored++;
+                }
+                if (!restored) throw new Error('nothing restored');
+                toast(`Restored ${restored} item(s) ✓`, 'ok');
+            } catch (e) { toast('Could not restore from the trash — try again', 'err'); }
             loadHist();
         }
 
@@ -6563,7 +7128,29 @@
                     nu.textContent = url;
                 }
                 const fb = document.getElementById('sp-ffmpeg');
-                if (fb) fb.textContent = d.ffmpeg ? '✓ FFmpeg' : '✓ Built-in';
+                // '✓ Built-in' for a *missing* FFmpeg told people everything was
+                // fine while MP3/merging was about to fail. Show the truth.
+                if (fb) {
+                    fb.textContent = d.ffmpeg ? '✓ FFmpeg' : '⚠ No FFmpeg';
+                    fb.classList.toggle('badge-ok', Boolean(d.ffmpeg));
+                    fb.classList.toggle('badge-warn', !d.ffmpeg);
+                    fb.title = d.ffmpeg
+                        ? ('Using ' + (d.ffmpeg_path || 'the FFmpeg on your PATH'))
+                        : 'Install FFmpeg for MP3 conversion and video merging — audio-only downloads from a single file still work.';
+                }
+                const engine = document.getElementById('sp-spotify-engine');
+                if (engine) {
+                    engine.textContent = d.spotify_engine === 'spotdl'
+                        ? '♫ spotdl' : '♫ YouTube match';
+                    engine.classList.toggle('badge-ok', d.spotify_engine === 'spotdl');
+                    engine.classList.toggle('badge-warn', d.spotify_engine !== 'spotdl');
+                    engine.title = d.spotify_engine === 'spotdl'
+                        ? 'Spotify links use spotdl, with a YouTube match as backup.'
+                        : 'Spotify links use a YouTube match because spotdl is unavailable on this PC.';
+                }
+                const problems = Array.isArray(d.problems) ? d.problems : [];
+                if (problems.length) setHealthBanner('IDLR needs one more thing', problems.join(' '));
+                else if (!window.__TAURI__) setHealthBanner('');
                 // premium Info modal mirrors
                 const iy = document.getElementById('info-ytdlp');
                 if (iy) iy.textContent = 'v' + (d.ytdlp || '—');
@@ -7217,6 +7804,24 @@
                     closeWhatsNew(); }
             });
             // Click outside dropdowns handled above
+            registerTabStrip('main', {
+                containerId: 'topnav',
+                indicatorId: 'tab-indicator',
+                hoverId: 'topnav-hover',
+                selector: '.nav-btn',
+                vertical: () => document.body.classList.contains('desktop-shell')
+            });
+            registerTabStrip('hist', {
+                containerId: 'hist-tabs',
+                indicatorId: 'hist-indicator',
+                hoverId: 'hist-hover',
+                selector: '.hist-tab'
+            });
+            bindTabKeys('main', 'topnav', '.nav-btn', t => gotoTab(t));
+            bindTabKeys('hist', 'hist-tabs', '.hist-tab', t => setHistTab(t));
+            _bindStripRelayout();
+            gotoTab(typeof gotoTab.current === 'string' ? gotoTab.current : 'dl');
+            try { checkEngineHealth(); } catch (e) {}
             setTimeout(() => updateTabIndicator('dl'), 100);
             loadSettingsState();
             const sv = localStorage.getItem('idlr_u');
