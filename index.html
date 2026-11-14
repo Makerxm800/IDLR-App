@@ -4523,7 +4523,7 @@
         <div class="modal-bg whatsnew-modal" id="whatsnew-modal" style="display:none" onclick="if(event.target===this)closeWhatsNew()">
             <div class="modal">
                 <button class="modal-close" onclick="closeWhatsNew()">✕</button>
-                <h3>🎉 What's New — v2.0.4</h3>
+                <h3>🎉 What's New <span class="js-appver"></span></h3>
                 <div class="whatsnew-list">
                     <div class="whatsnew-item">
                         <span class="icon">🪟</span>
@@ -4536,6 +4536,14 @@
                     <div class="whatsnew-item">
                         <span class="icon">🛡️</span>
                         <span class="text"><strong>Recovery help</strong> — if Windows Defender quarantines IDLR's helper, a banner explains how to restore it and retry, and the keyboard can drive the tabs (← → Home End).</span>
+                    </div>
+                    <div class="whatsnew-item">
+                        <span class="icon">💾</span>
+                        <span class="text"><strong>Your history stays put</strong> — simultaneous downloads can no longer overwrite each other's rows, an unreadable history file is kept as <em>history.json.corrupt-…</em> instead of looking empty, and long sessions stop growing memory until the helper is killed.</span>
+                    </div>
+                    <div class="whatsnew-item">
+                        <span class="icon">ℹ️</span>
+                        <span class="text"><strong>Version shown is the real one</strong> — the app no longer prints a hard-coded version number in the Info panel and footers, so what you see matches what IDLR will update from.</span>
                     </div>
                 </div>
                 <button class="btn-red" onclick="closeWhatsNew()" style="margin-top:4px">Got it!</button>
@@ -4675,12 +4683,12 @@
                     <div class="info-hero">
                         <div class="info-hero-logo">IDL</div>
                         <div>
-                            <div class="info-hero-name">IDLR <span class="info-hero-ver">v2.0.4</span></div>
+                            <div class="info-hero-name">IDLR <span class="info-hero-ver js-appver"></span></div>
                             <div class="info-hero-sub">Internet Downloader — grab video &amp; audio from 1000+ sites. Runs 100% on your PC, zero tracking.</div>
                         </div>
                     </div>
                     <div class="info-stats">
-                        <div class="info-stat"><div class="info-stat-n" id="info-ver">v2.0.4</div><div class="info-stat-l">App</div></div>
+                        <div class="info-stat"><div class="info-stat-n js-appver" id="info-ver"></div><div class="info-stat-l">App</div></div>
                         <div class="info-stat"><div class="info-stat-n" id="info-ytdlp">…</div><div class="info-stat-l">yt-dlp</div></div>
                         <div class="info-stat"><div class="info-stat-n" id="info-ffmpeg">…</div><div class="info-stat-l">FFmpeg</div></div>
                     </div>
@@ -4729,7 +4737,7 @@
                             Send Feedback
                         </button>
                     </div>
-                    <div style="margin-top:16px;font-size:10px;color:var(--fg3);text-align:center;">© 2026 IDLR · v2.0.4 · made for fast, private downloading</div>
+                    <div style="margin-top:16px;font-size:10px;color:var(--fg3);text-align:center;">© 2026 IDLR · <span class="js-appver"></span> · made for fast, private downloading</div>
                 </div>
             </div>
 
@@ -4915,7 +4923,7 @@
                         <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>
                     </svg>
                     Settings
-                    <span class="settings-ver-pill" id="settings-ver">v2.0.4</span>
+                    <span class="settings-ver-pill js-appver" id="settings-ver"></span>
                 </h3>
                 <p class="settings-head-sub">Every switch works instantly and is saved on this device.</p>
 
@@ -5126,7 +5134,7 @@
                 </div>
 
                 <div style="text-align:center;padding:20px 0 4px;font-size:10px;color:var(--fg3)">
-                    IDLR App — Internet Downloader · © 2026 · <span id="settings-ver-foot">v2.0.4</span>
+                    IDLR App — Internet Downloader · © 2026 · <span id="settings-ver-foot" class="js-appver"></span>
                 </div>
             </div>
         </div>
@@ -5358,6 +5366,46 @@
             toast('Notifications cleared', 'ok');
         }
 
+        /* ══ APP VERSION ══
+           The version is a release detail the UI must never hard-code: it comes
+           from /api/info and every element that wants it carries class
+           "js-appver". tests/test_release.py fails if a literal version creeps
+           back into this file. */
+        let _appVersion = '';
+        let _whatsNewChecked = false;
+
+        async function ensureAppVersion() {
+            // Called at page load, not after login: the footers, the Info modal
+            // and the What's New gate all need the version, and a guest who never
+            // signs in would otherwise see blanks and no release notes.
+            if (_appVersion) return _appVersion;
+            try {
+                const r = await fetch('/api/info');
+                const d = await r.json();
+                if (d && d.version) setAppVersion(d.version);
+            } catch (e) { /* backend not up yet; loadInfo() will retry */ }
+            return _appVersion;
+        }
+
+        function setAppVersion(version) {
+            _appVersion = String(version || '').replace(/^v/, '');
+            const label = _appVersion ? 'v' + _appVersion : '';
+            document.querySelectorAll('.js-appver').forEach(el => { el.textContent = label; });
+            maybeOpenWhatsNew();
+        }
+
+        function whatsNewKey() {
+            return 'idlr_whatsnew_' + (_appVersion ? _appVersion.replace(/\./g, '') : 'dev') + '_shown';
+        }
+
+        function maybeOpenWhatsNew() {
+            if (_whatsNewChecked || !_appVersion) return;
+            _whatsNewChecked = true;
+            try {
+                if (!localStorage.getItem(whatsNewKey())) setTimeout(openWhatsNew, 800);
+            } catch (e) { /* private mode: localStorage unavailable, no gate */ }
+        }
+
         /* ══ WHAT'S NEW ══ */
         function openWhatsNew() {
             const modal = document.getElementById('whatsnew-modal');
@@ -5375,7 +5423,10 @@
             if (m) m.classList.add('closing');
             setTimeout(() => { bg.style.display = 'none';
                 bg.classList.remove('closing'); if (m) m.classList.remove('closing'); }, 250);
-            localStorage.setItem('idlr_whatsnew_v204_shown', 'true');
+            // Keyed by version, so a new release shows once and only once —
+            // the old hard-coded `..._v204_shown` meant editing this file twice
+            // per release (and the modal reappearing forever if you forgot).
+            try { localStorage.setItem(whatsNewKey(), 'true'); } catch (e) {}
         }
 
         /* ══ FEEDBACK MODAL ══ */
@@ -6180,10 +6231,8 @@
                 addNotification(`Welcome, ${user.name.split(' ')[0]}! Ready to download.`, 'info');
             }
 
-            // Show What's New for this version if not shown before
-            if (!localStorage.getItem('idlr_whatsnew_v204_shown')) {
-                setTimeout(openWhatsNew, 800);
-            }
+            // The What's New modal opens from setAppVersion(), once loadInfo()
+            // knows which version this actually is.
         }
 
         /* ══ DELETE ACCOUNT ══ */
@@ -7165,10 +7214,7 @@
                     try { updatePathDisplay(); } catch (e) {}
                     if (isp) isp.textContent = currentSavePath();
                 }
-                if (d.version) {
-                    const iv = document.getElementById('info-ver');
-                    if (iv) iv.textContent = 'v' + d.version;
-                }
+                if (d.version) setAppVersion(d.version);
             } catch (e) { console.warn('loadInfo error', e); }
         }
 
@@ -7790,6 +7836,7 @@
                 if (label) button.setAttribute('title', label.slice(0, 80));
             });
             loadNotifications();
+            ensureAppVersion();
 
             document.getElementById('inp-pw')?.addEventListener('keydown', e => { if (e.key === 'Enter') doAuth(); });
             document.getElementById('inp-email')?.addEventListener('keydown', e => { if (e.key === 'Enter') doAuth(); });
