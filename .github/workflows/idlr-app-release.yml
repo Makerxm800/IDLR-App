@@ -61,7 +61,11 @@ jobs:
         if: runner.os == 'Linux'
         run: python -m pip install PyGObject
 
+      # Same switch as .github/workflows/tests.yml: the suite must not race a
+      # best-effort FFmpeg download that `import app` would otherwise start.
       - name: Run test suite
+        env:
+          IDLR_NO_AUTO_INSTALL: "1"
         run: python -m unittest discover -s tests
 
       - name: Build desktop app

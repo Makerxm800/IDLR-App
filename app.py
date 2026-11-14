@@ -241,6 +241,15 @@ def _setup_ffmpeg():
     # Nothing on disk: fetch it in the background so opening IDLR never waits
     # on a 30 MB download. refresh_ffmpeg_paths() picks it up from the next
     # download onwards.
+    if os.environ.get("IDLR_NO_AUTO_INSTALL") == "1":
+        # The same switch the dependency probe above honours: "do not fetch
+        # anything at startup". Tests and CI run with it, because a 30 MB
+        # download started by a background thread while assertions are running
+        # is a source of flakes, not of coverage. FFmpeg simply stays unset,
+        # which is a supported state (the app says so and keeps working).
+        log("SETUP", "  [..] FFmpeg not found — skipping the automatic download (IDLR_NO_AUTO_INSTALL=1)")
+        return
+
     def fetch():
         global _FFMPEG_READY
         try:

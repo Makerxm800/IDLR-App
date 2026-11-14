@@ -1,0 +1,58 @@
+name: Run tests on every OS
+
+# A release is published by pushing a `v*` tag, and the release workflow runs
+# `python -m unittest discover -s tests` as a gate inside each platform job. The
+# v2.0.5 attempt learned that the hard way: the suite passed on Linux and failed
+# on Windows because the checkout had CRLF line endings, and because the matrix
+# shares that one gate the macOS and Ubuntu jobs were cancelled before building
+# anything. That is a ten-minute round trip to learn something a PR check can
+# say in about a minute — and it says it *before* a tag exists.
+#
+# So this workflow runs nothing but the tests, on the same three OSes, with the
+# same Python version and the same dependency file as the release job. Keep the
+# two in sync; a check that passes here and fails there is worse than no check.
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+# `IDLR_NO_AUTO_INSTALL=1` keeps the suite honest and offline: importing app.py
+# otherwise starts a best-effort 30 MB FFmpeg download from a background thread,
+# which is app behaviour, not something a test run should be racing. The release
+# workflow sets the same thing for its test step, so the two agree.
+env:
+  IDLR_NO_AUTO_INSTALL: "1"
+
+jobs:
+  test:
+    name: Test suite (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      # The whole point is to see every platform's verdict, including the ones
+      # that disagree with each other.
+      fail-fast: false
+      matrix:
+        os: [windows-latest, ubuntu-24.04, macos-14]
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: requirements-build.txt
+
+      - name: Install Python dependencies
+        run: python -m pip install -r requirements-build.txt
+
+      - name: Run test suite
+        run: python -m unittest discover -s tests -v
+
+      # The release guards also run this inside the suite, but a version that
+      # disagrees between files is worth its own red cross with a readable name.
+      - name: Verify every version source agrees
+        run: python scripts/set_version.py --check
