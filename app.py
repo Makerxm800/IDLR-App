@@ -169,6 +169,40 @@ _FFMPEG_READY = False
 _STARTUP_CHECKS = threading.Event()
 
 
+def _shipped_ffmpeg_dir(exe_path=None):
+    """The FFmpeg folder the installer ships *next to* this helper, if present.
+
+    build.py stages one copy of FFmpeg into `dist/ffmpeg/` and tauri.conf.json
+    maps it to `binaries/ffmpeg/`, so an installed IDLR has ffmpeg/ffprobe as a
+    sibling of idlr-worker.exe — written once by the installer, never re-extracted
+    on launch, and not something the helper has to download or write anywhere.
+    Several layouts are searched for the same reason `_find_bundled_binary` is:
+    a resource glob may keep the folder or flatten it into `binaries/`, and the
+    worker may be run from inside or next to that folder.
+    """
+    if not IS_FROZEN:
+        return ""
+    suffix = ".exe" if os.name == "nt" else ""
+    names = ("ffmpeg" + suffix, "ffprobe" + suffix)
+    try:
+        anchor = Path(exe_path or sys.executable).resolve().parent
+    except Exception:
+        return ""
+    folders = []
+    for base in (anchor, *list(anchor.parents)[:2]):
+        folders += [base / "ffmpeg", base]
+    meipass = getattr(sys, "_MEIPASS", "")
+    if meipass:
+        folders.append(Path(meipass) / "ffmpeg")
+    for folder in folders:
+        try:
+            if all((folder / name).is_file() for name in names):
+                return str(folder)
+        except OSError:  # unreadable path (permission, offline drive): keep looking
+            continue
+    return ""
+
+
 def _bundled_ffmpeg_dir():
     """The folder static-ffmpeg keeps its binaries in, if they are already there.
 
@@ -177,6 +211,9 @@ def _bundled_ffmpeg_dir():
     with PermissionError in a read-only install like `C:\\Program Files\\IDLR`,
     and used to be reported as 'FFmpeg missing' — or, before that, as a crash.
     """
+    shipped = _shipped_ffmpeg_dir()
+    if shipped:
+        return shipped
     if static_ffmpeg is None:
         return ""
     try:

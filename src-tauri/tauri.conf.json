@@ -41,7 +41,8 @@
       "../frontend-dist/index.html": "browser-ui/index.html",
       "../frontend-dist/favicon.svg": "browser-ui/favicon.svg",
       "../dist/idlr-worker*": "binaries/",
-      "../dist/IDLR-spotdl*": "binaries/"
+      "../dist/IDLR-spotdl*": "binaries/",
+      "../dist/ffmpeg/*": "binaries/ffmpeg/"
     },
     "icon": [
       "icons/32x32.png",
