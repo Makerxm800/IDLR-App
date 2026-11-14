@@ -102,6 +102,8 @@ A release starts with one command, because the version has to agree in seven pla
 
 **Check before you tag.** A `v*` tag is the publish path, so it is not a way to try something out: the release workflow builds all three platforms and publishes as soon as its test step is green. `.github/workflows/tests.yml` ("Run tests on every OS") runs the same suite the release job gates on — Windows, Linux and macOS, about a minute, no bundling — on every pull request and every push to `main`. Wait for it. The `v2.0.5` attempt skipped that step and found out that a test which only passes on LF checkouts fails on a Windows one (`core.autocrlf`), and that a single failing platform cancels the other two before they can build.
 
+**If the macOS runner is unavailable, the release still ships.** macOS minutes cost 10x and that job can be cancelled before a single step runs, so it is deliberately its own job rather than a matrix leg: `publish` accepts a macOS build that was cancelled or skipped, and the updater manifest is generated with `--allow-missing-platform macos`, which leaves the `darwin-*` entries out of `latest.json` — macOS installs keep their current version instead of being offered an update that does not exist. A macOS build that *fails* still stops the release, and a missing Windows or Linux package can never be excused by that flag. `python scripts/create_updater_manifest.py --help` shows the same switch for a manual run.
+
 ### Run from source
 
 Install the JavaScript and Python build/runtime dependencies once. These commands start the actual Tauri desktop app in development mode:
