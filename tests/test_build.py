@@ -146,21 +146,29 @@ class SharedFFmpegBundlingTests(unittest.TestCase):
         self.assertIn('"--collect-submodules",\n        "static_ffmpeg"', source)
 
     def test_staging_copies_both_tools_once(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            bin_dir = Path(tmp) / "bin"
-            bin_dir.mkdir()
-            for tool in ("ffmpeg", "ffprobe"):
-                (bin_dir / tool).write_text("#!/bin/sh\n", encoding="utf-8")
-            stage = Path(tmp) / "dist" / "ffmpeg"
-            with (
-                unittest.mock.patch.object(build.shutil, "which",
-                                           side_effect=lambda name, *a, **k: str(bin_dir / name)
-                                           if name in ("ffmpeg", "ffprobe") else None),
-                unittest.mock.patch.object(build, "ffmpeg_staging_dir", lambda: stage),
-            ):
-                self.assertTrue(build.stage_ffmpeg_for_bundling())
-            self.assertEqual(sorted(p.name for p in stage.iterdir()), ["ffmpeg", "ffprobe"])
-            self.assertFalse((stage / "FFmpeg-not-staged.txt").exists())
+        # Both platforms, every run: the packaged names differ by suffix, and the
+        # first version of this test only ever checked the one it was written on
+        # (which is exactly how it went red on the Windows runner).
+        for windows in (False, True):
+            suffix = ".exe" if windows else ""
+            with self.subTest(windows=windows), tempfile.TemporaryDirectory() as tmp:
+                bin_dir = Path(tmp) / "bin"
+                bin_dir.mkdir()
+                for tool in ("ffmpeg", "ffprobe"):
+                    (bin_dir / (tool + suffix)).write_text("#!/bin/sh\n", encoding="utf-8")
+                stage = Path(tmp) / "dist" / "ffmpeg"
+                with (
+                    unittest.mock.patch.object(build, "IS_WINDOWS", windows),
+                    unittest.mock.patch.object(build.shutil, "which",
+                                               side_effect=lambda name, *a, **k:
+                                               str(bin_dir / (name + suffix))
+                                               if name in ("ffmpeg", "ffprobe") else None),
+                    unittest.mock.patch.object(build, "ffmpeg_staging_dir", lambda: stage),
+                ):
+                    self.assertTrue(build.stage_ffmpeg_for_bundling())
+                expected = sorted(tool + suffix for tool in ("ffmpeg", "ffprobe"))
+                self.assertEqual(sorted(path.name for path in stage.iterdir()), expected)
+                self.assertFalse((stage / "FFmpeg-not-staged.txt").exists())
 
     def test_a_build_without_ffmpeg_still_produces_a_bundle(self):
         """Tauri refuses a resource glob that matches nothing, so the folder has
