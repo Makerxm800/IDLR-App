@@ -17,8 +17,9 @@ TESTS = (ROOT / ".github" / "workflows" / "tests.yml").read_text(encoding="utf-8
 
 
 def job_body(source, job_id):
-    """The lines of one top-level job, up to the next job or dedented key."""
-    match = re.search(rf"^  {job_id}:\n((?:^(?:    |      |        |\t).*\n?)+)", source, re.M)
+    """One top-level job's whole body: every line indented at least four spaces,
+    blank lines included, stopping at the next job (which is indented two)."""
+    match = re.search(rf"^  {job_id}:\n((?:(?: {{4,}}|\t).*\n?|\n)+)", source, re.M)
     assert match, f"{job_id} is not a job in this workflow"
     return match.group(1)
 
@@ -71,6 +72,22 @@ class ReleaseWorkflowTests(unittest.TestCase):
         self.assertIn('if [ "${{ needs.build-macos.result }}" = "success" ]; then', RELEASE)
         self.assertIn('echo "flag=--allow-missing-platform macos"', RELEASE)
         self.assertIn("${{ steps.macos.outputs.flag }}", RELEASE)
+
+    def test_the_bundled_ffmpeg_is_verified_not_assumed(self):
+        """`dist/ffmpeg/` existing is not the same as the installer carrying it.
+
+        A resource glob that matches nothing is a Tauri error, but a mapping that
+        points at the right folder and lands in the wrong *layout* is not, and
+        the symptom would be an installed IDLR that cannot convert MP3s. Both
+        build jobs therefore look for the file inside the build tree.
+        """
+        for job in ("build-desktop", "build-macos"):
+            body = job_body(RELEASE, job)
+            self.assertIn("- name: Verify the shared FFmpeg was bundled", body,
+                          f"{job} must check that the staged FFmpeg reached the bundle")
+            self.assertIn("find src-tauri/target", body)
+            self.assertIn("FFmpeg-not-staged.txt", body,
+                          "a build without FFmpeg is allowed, it must not be a surprise")
 
     def test_the_stable_installer_name_is_still_produced(self):
         """The desktop app's updater and the README's download link both point at

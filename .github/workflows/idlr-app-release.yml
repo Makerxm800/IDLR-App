@@ -80,6 +80,25 @@ jobs:
           fi
           python build.py
 
+      # FFmpeg must reach the bundle as a file beside the helpers, not as a copy
+      # sealed inside each onefile exe: that is what makes the install smaller and
+      # stops every launch re-extracting ~80 MB into %TEMP%. Checked here rather
+      # than trusted, because a resource mapping that silently matched nothing
+      # would still produce a green build.
+      - name: Verify the shared FFmpeg was bundled
+        shell: bash
+        run: |
+          if [ -f dist/ffmpeg/FFmpeg-not-staged.txt ]; then
+            echo "::warning::This build staged no FFmpeg (none was available at build time); IDLR will use a system FFmpeg."
+            exit 0
+          fi
+          found="$(find src-tauri/target -type f \( -name ffmpeg -o -name ffmpeg.exe \) -print -quit 2>/dev/null || true)"
+          if [ -z "$found" ]; then
+            echo "::error::dist/ffmpeg was staged but no ffmpeg reached the bundle — check bundle.resources in src-tauri/tauri.conf.json."
+            exit 1
+          fi
+          echo "Bundled shared FFmpeg: $found"
+
       - name: Record updater platform
         shell: bash
         run: printf '%s\n' '${{ runner.arch }}' > "src-tauri/target/release/bundle/target-${{ runner.os }}.txt"
@@ -145,6 +164,25 @@ jobs:
             exit 1
           fi
           python build.py
+
+      # FFmpeg must reach the bundle as a file beside the helpers, not as a copy
+      # sealed inside each onefile exe: that is what makes the install smaller and
+      # stops every launch re-extracting ~80 MB into %TEMP%. Checked here rather
+      # than trusted, because a resource mapping that silently matched nothing
+      # would still produce a green build.
+      - name: Verify the shared FFmpeg was bundled
+        shell: bash
+        run: |
+          if [ -f dist/ffmpeg/FFmpeg-not-staged.txt ]; then
+            echo "::warning::This build staged no FFmpeg (none was available at build time); IDLR will use a system FFmpeg."
+            exit 0
+          fi
+          found="$(find src-tauri/target -type f \( -name ffmpeg -o -name ffmpeg.exe \) -print -quit 2>/dev/null || true)"
+          if [ -z "$found" ]; then
+            echo "::error::dist/ffmpeg was staged but no ffmpeg reached the bundle — check bundle.resources in src-tauri/tauri.conf.json."
+            exit 1
+          fi
+          echo "Bundled shared FFmpeg: $found"
 
       - name: Record updater platform
         shell: bash
