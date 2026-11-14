@@ -6,6 +6,7 @@ Fast · Private · Unlimited
 """
 import argparse, base64, hashlib, json, os, re, shutil, subprocess, sys, tempfile, urllib.request, zipfile
 import io
+from pathlib import Path
 
 APP_VERSION = "2.0.4"
 APP_DIR = os.path.join(os.path.expanduser("~"), ".idlr_app")
@@ -33,79 +34,235 @@ def _activate_updated_ytdlp():
     except (OSError, ValueError, TypeError, json.JSONDecodeError) as exc:
         log("UPDATE", f"Ignoring invalid local yt-dlp update: {exc}")
 
+LOG_FILE = os.path.join(APP_DIR, "idlr.log")
+_LOG_LIMIT = 1024 * 1024  # keep idlr.log under ~1 MB so it never fills the disk
+
+
 def log(tag, msg):
-    """Pretty timestamped terminal log, e.g. [12:01:44] [IDLR:DL] message."""
+    """Pretty timestamped log, e.g. [12:01:44] [IDLR:DL] message.
+
+    Always appended to ~/.idlr_app/idlr.log *and* echoed to the console. The
+    bundled desktop worker has no console at all, so the file is the only place
+    a user (or a bug report) can find out why something failed.
+    """
     import datetime as _dt
     ts = _dt.datetime.now().strftime("%H:%M:%S")
     line = f"[{ts}] [{tag}] {msg}"
+    try:
+        os.makedirs(APP_DIR, exist_ok=True)
+        if os.path.isfile(LOG_FILE) and os.path.getsize(LOG_FILE) > _LOG_LIMIT:
+            with open(LOG_FILE, "rb") as stream:
+                stream.seek(-_LOG_LIMIT // 2, os.SEEK_END)
+                tail = stream.read()
+            with open(LOG_FILE, "wb") as stream:
+                stream.write(b"[...] " + tail.split(b"\n", 1)[-1])
+        with open(LOG_FILE, "a", encoding="utf-8") as stream:
+            stream.write(line + "\n")
+    except OSError:
+        pass
     if sys.stdout is None:
-        log_path = os.path.join(os.path.expanduser("~"), ".idlr_app", "idlr.log")
-        try:
-            os.makedirs(os.path.dirname(log_path), exist_ok=True)
-            with open(log_path, "a", encoding="utf-8") as stream:
-                stream.write(line + "\n")
-        except OSError:
-            pass
         return
     try:
         print(line, flush=True)
     except (UnicodeEncodeError, OSError):
-        print(line.encode("ascii", "replace").decode(), flush=True)
+        try:
+            print(line.encode("ascii", "replace").decode(), flush=True)
+        except Exception:
+            pass
 
 
 _activate_updated_ytdlp()
 
-
-def pip(pkg):
-    log("SETUP", f"Installing {pkg} ... (first run only)")
-    subprocess.check_call([sys.executable,"-m","pip","install","-U",pkg,"-q"],
-                          stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-    log("SETUP", f"Installed {pkg} OK")
-
 # spotdl is OPTIONAL: the app must start even if the Spotify engine is broken
 # (e.g. a pydantic/pydantic-core version clash after an upgrade). In that case
 # YouTube etc. keep working and Spotify downloads show the exact repair command.
-OPTIONAL_PKGS = {"spotdl"}
+OPTIONAL_PKGS = {"spotdl", "static-ffmpeg"}
 BROKEN_PKGS = set()
+# Human-readable startup problems, surfaced through /api/info so the UI can
+# explain itself instead of dying silently.
+SETUP_PROBLEMS = []
+IS_FROZEN = bool(getattr(sys, "frozen", False))
+
+
+def _pip_install(pkg, timeout=180):
+    """Best-effort dependency repair for source installs only.
+
+    Never used in the bundled app (pip inside a frozen build writes next to
+    the exe and is exactly what antivirus heuristics love to quarantine), and
+    never fatal: a blocked network or a PEP-668 managed environment must not
+    stop IDLR from starting.
+    """
+    log("SETUP", f"Installing {pkg} ... (first run only)")
+    subprocess.check_call([sys.executable, "-m", "pip", "install", "-U", pkg, "-q"],
+                          stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                          timeout=timeout)
+    log("SETUP", f"Installed {pkg} OK")
+
 
 log("SETUP", "Checking dependencies (flask, yt-dlp, static-ffmpeg, spotdl) ...")
-for p,i in [("flask","flask"),("yt-dlp","yt_dlp"),("static-ffmpeg","static_ffmpeg"),("spotdl","spotdl")]:
+for p, i in [("flask", "flask"), ("yt-dlp", "yt_dlp"),
+             ("static-ffmpeg", "static_ffmpeg"), ("spotdl", "spotdl")]:
     try:
         __import__(i)
         log("SETUP", f"  [OK] {p} already installed")
     except Exception as e:
-        if getattr(sys, "frozen", False):
-            if p in OPTIONAL_PKGS:
-                BROKEN_PKGS.add(p)
-                log("SETUP", f"  [WARN] Bundled {p} is unavailable; Spotify downloads will use the YouTube fallback.")
-                continue
-            log("SETUP", f"  [FATAL] Bundled {p} is unavailable: {type(e).__name__}: {str(e)[:160]}")
-            sys.exit(1)
         # NOTE: except Exception (not just ImportError) — a broken install can
-        # raise SystemError and friends at import time; that must never kill startup.
-        log("SETUP", f"  [!!] {p} import failed ({type(e).__name__}: {str(e)[:110]}) — repairing ...")
-        try:
-            pip(p)
-            __import__(i)
-            log("SETUP", f"  [OK] {p} repaired")
-        except Exception as e2:
-            if p in OPTIONAL_PKGS:
-                BROKEN_PKGS.add(p)
-                log("SETUP", f"  [WARN] {p} still broken — starting anyway. Spotify downloads will explain the fix.")
-                log("SETUP", f"  [WARN] Manual repair: python -m pip install -U pydantic pydantic-core spotdl")
-            else:
-                log("SETUP", f"  [FATAL] {p} is required but broken: {str(e2)[:160]}")
-                log("SETUP", f"  [FATAL] Repair with: python -m pip install -U --force-reinstall {p}")
-                sys.exit(1)
+        # raise SystemError and friends at import time; that must never kill
+        # startup on its own.
+        log("SETUP", f"  [!!] {p} import failed ({type(e).__name__}: {str(e)[:110]})")
+        if not IS_FROZEN and os.environ.get("IDLR_NO_AUTO_INSTALL") != "1":
+            try:
+                _pip_install(p)
+                __import__(i)
+                log("SETUP", f"  [OK] {p} repaired")
+                continue
+            except Exception as e2:
+                log("SETUP", f"  [!!] automatic repair of {p} failed: {str(e2)[:110]}")
+        if p in OPTIONAL_PKGS:
+            BROKEN_PKGS.add(p)
+            note = (f"{p} is unavailable — Spotify downloads fall back to YouTube matching."
+                    if p == "spotdl" else
+                    "FFmpeg helper (static-ffmpeg) is unavailable — using the system FFmpeg instead.")
+            log("SETUP", f"  [WARN] {note}")
+            SETUP_PROBLEMS.append(note)
+            continue
+        # A required package is missing. Raising (rather than sys.exit) keeps the
+        # traceback in the log and lets the desktop worker answer with a real
+        # error message instead of vanishing mid-handshake.
+        SETUP_PROBLEMS.append(f"{p} is required but broken: {str(e)[:160]}")
+        raise RuntimeError(
+            f"IDLR cannot start: the required component '{p}' is missing or broken "
+            f"({type(e).__name__}: {str(e)[:160]}). "
+            "If you installed IDLR manually, reinstall it; Windows Defender sometimes "
+            "quarantines IDLR's bundled files — restore them and add an exclusion."
+        )
 
 log("SETUP", "Loading application modules ...")
 from flask import Flask, request, jsonify, Response, send_from_directory
-import yt_dlp, static_ffmpeg, shutil, json, hashlib, datetime
+import yt_dlp, shutil, json, hashlib, datetime
 import threading, uuid, re, time, socket, webbrowser
 
+try:
+    import static_ffmpeg
+except Exception:  # already reported above; degrade instead of crashing
+    static_ffmpeg = None
+
 log("SETUP", "Preparing FFmpeg ...")
-static_ffmpeg.add_paths()
+
+_FFMPEG_READY = False
+
+
+def _bundled_ffmpeg_dir():
+    """The folder static-ffmpeg keeps its binaries in, if they are already there.
+
+    Reading the directory directly (instead of calling `add_paths`) matters:
+    `add_paths` takes a lock file inside its own package folder, which fails
+    with PermissionError in a read-only install like `C:\\Program Files\\IDLR`,
+    and used to be reported as 'FFmpeg missing' — or, before that, as a crash.
+    """
+    if static_ffmpeg is None:
+        return ""
+    try:
+        from static_ffmpeg.run import get_platform_dir  # type: ignore
+
+        folder = get_platform_dir()
+    except Exception:
+        return ""
+    suffix = ".exe" if sys.platform == "win32" else ""
+    if all(os.path.isfile(os.path.join(folder, tool + suffix))
+           for tool in ("ffmpeg", "ffprobe")):
+        return folder
+    return ""
+
+
+def _have_ffmpeg_on_path():
+    return bool(shutil.which("ffmpeg")) and bool(shutil.which("ffprobe"))
+
+
+def _setup_ffmpeg():
+    """Make ffmpeg/ffprobe reachable — and NEVER let this kill startup.
+
+    static-ffmpeg downloads a ~30 MB FFmpeg build the first time it runs. That
+    network call (a proxy, a certificate-rewriting antivirus, a read-only
+    install folder, or a stale lock file left by a previous crash) used to raise
+    straight out of `import app`, which took down the whole app and the bundled
+    worker with it: IDLR simply never opened. Prefer a system FFmpeg, treat the
+    bundled one as an optional extra, and never block startup on a download.
+    """
+    global _FFMPEG_READY
+    if _have_ffmpeg_on_path():
+        _FFMPEG_READY = True
+        log("SETUP", "  [OK] FFmpeg is available on PATH")
+        return
+    bundled = _bundled_ffmpeg_dir()
+    if bundled:
+        os.environ["PATH"] = os.pathsep.join(
+            [bundled] + [p for p in os.environ.get("PATH", "").split(os.pathsep)
+                         if p and p != bundled]
+        )
+        _FFMPEG_READY = _have_ffmpeg_on_path()
+        log("SETUP", "  [OK] Using the FFmpeg bundled with IDLR" if _FFMPEG_READY
+            else "  [WARN] Bundled FFmpeg is incomplete — MP3/merging may fail")
+        return
+    if static_ffmpeg is None:
+        SETUP_PROBLEMS.append(
+            "FFmpeg was not found. Install FFmpeg for audio conversion and video merging."
+        )
+        log("SETUP", "  [WARN] No FFmpeg helper and none on PATH — MP3/merging may fail")
+        return
+    if IS_FROZEN:
+        # An installed app must not create files inside its own (possibly
+        # read-only, Program Files) folder — that is also exactly the kind of
+        # behaviour antivirus loves to block. The build ships FFmpeg instead.
+        SETUP_PROBLEMS.append(
+            "FFmpeg is not bundled with this IDLR build and none was found on PATH. "
+            "Install FFmpeg for MP3 conversion and video merging."
+        )
+        log("SETUP", "  [WARN] No FFmpeg in the bundle and none on PATH — not downloading into the install folder")
+        return
+
+    # Nothing on disk: fetch it in the background so opening IDLR never waits
+    # on a 30 MB download. refresh_ffmpeg_paths() picks it up from the next
+    # download onwards.
+    def fetch():
+        global _FFMPEG_READY
+        try:
+            static_ffmpeg.add_paths(weak=True)
+            if _have_ffmpeg_on_path():
+                _FFMPEG_READY = True
+                refresh_ffmpeg_paths()
+                log("SETUP", "  [OK] FFmpeg ready (downloaded in the background)")
+        except Exception as e:
+            log("SETUP", f"  [WARN] Background FFmpeg setup failed ({type(e).__name__}: {str(e)[:110]})")
+            SETUP_PROBLEMS.append(
+                "IDLR could not prepare FFmpeg (offline, proxy, or antivirus). "
+                "Install FFmpeg yourself for MP3 conversion and video merging."
+            )
+
+    threading.Thread(target=fetch, name="idlr-ffmpeg-setup", daemon=True).start()
+    log("SETUP", "  [..] FFmpeg not found — preparing it in the background")
+
+
+_setup_ffmpeg()
 FFMPEG = shutil.which("ffmpeg") or ""
+
+
+def refresh_ffmpeg_paths():
+    """Re-detect ffmpeg/ffprobe before a job.
+
+    If the background FFmpeg setup from earlier in this run has finished, the
+    next download picks it up without needing an app restart.
+    """
+    global FFMPEG, _FFMPEG_READY
+    found = shutil.which("ffmpeg") or ""
+    if found:
+        _FFMPEG_READY = True
+        if found != FFMPEG:
+            FFMPEG = found
+            log("SETUP", f"FFmpeg ready: {found}")
+    return FFMPEG
+
+
 log("SETUP", "Application modules ready.")
 
 # ── Storage ───────────────────────────────────────────────────────────────────
@@ -113,14 +270,84 @@ ACCS_FILE = os.path.join(APP_DIR, "accounts.json")
 HIST_FILE = os.path.join(APP_DIR, "history.json")
 os.makedirs(APP_DIR, exist_ok=True)
 SERVER_URL = "http://localhost:5000"
+# History/accounts are written from download threads AND request handlers.
+_DATA_LOCK = threading.RLock()
+# Upper bound for history.json entries; newest rows win, starred/trashed are kept.
+_HISTORY_CAP = 1500
 
 def jload(p, d):
+    """Load JSON, tolerating a file that was truncated by a crash/power loss.
+
+    A half-written history.json used to mean `except: return d` — every entry
+    silently vanished and the user just saw an empty app. We keep the damaged
+    copy next to the file and hand back the default so the app still opens.
+    """
     try:
-        with open(p) as f: return json.load(f)
-    except: return d
+        with open(p, encoding="utf-8") as f:
+            return json.load(f)
+    except FileNotFoundError:
+        return d
+    except Exception as e:
+        return _salvage_json(p, e, d)
+
+
+def _salvage_json(p, error, default):
+    """Keep a damaged file instead of pretending it was empty."""
+    try:
+        if os.path.isfile(p):
+            salvage = p + ".corrupt-" + time.strftime("%Y%m%d-%H%M%S")
+            shutil.copy2(p, salvage)
+            log("DATA", f"{os.path.basename(p)} was unreadable ({error}); kept a copy at {salvage}")
+    except OSError:
+        pass
+    return default
+def _replace_with_retry(src, dst, attempts=6):
+    """os.replace that survives Windows file locking.
+
+    Defender holds newly written files for a fraction of a second to scan them;
+    a replace that lands in that window raises PermissionError and the save is
+    simply lost. A few short retries fix that, and the final failure is logged
+    instead of swallowed.
+    """
+    last = None
+    for attempt in range(attempts):
+        try:
+            os.replace(src, dst)
+            return
+        except OSError as e:
+            last = e
+            time.sleep(0.05 * (attempt + 1))
+    raise last
+
 
 def jsave(p, d):
-    with open(p,"w") as f: json.dump(d, f, indent=2)
+    """Atomic save: write a temp file in the same folder, then os.replace it.
+
+    Download threads and request handlers write history at the same time, so
+    this is also serialised by a lock — a torn write here used to wipe the
+    user's whole history.
+    """
+    directory = os.path.dirname(p) or "."
+    with _DATA_LOCK:
+        tmp = None
+        try:
+            os.makedirs(directory, exist_ok=True)
+            with tempfile.NamedTemporaryFile("w", encoding="utf-8", dir=directory,
+                                            prefix="." + os.path.basename(p) + ".",
+                                            suffix=".tmp", delete=False) as f:
+                tmp = f.name
+                json.dump(d, f, indent=2)
+                f.flush()
+                os.fsync(f.fileno())
+            _replace_with_retry(tmp, p)
+        except OSError as e:
+            log("DATA", f"Could not save {os.path.basename(p)}: {e}")
+            if tmp:
+                try:
+                    os.remove(tmp)
+                except OSError:
+                    pass
+
 
 def hashpw(pw): return hashlib.sha256(pw.encode()).hexdigest()
 
@@ -245,6 +472,84 @@ SCRIPT_DIR = getattr(sys, "_MEIPASS", os.path.dirname(os.path.abspath(__file__))
 app = Flask(__name__, static_folder=SCRIPT_DIR, template_folder=SCRIPT_DIR)
 app.config["MAX_CONTENT_LENGTH"] = 5 * 1024 * 1024
 _jobs = {}
+_JOBS_KEEP = 40          # finished jobs kept for the UI before being dropped
+_JOBS_TTL = 30 * 60      # seconds a finished job may stay in memory
+_JOBS_GRACE = 90         # never drop a job that just finished: the UI may still poll it
+_JOBS_HARD_KEEP = 200    # absolute ceiling, grace window notwithstanding
+_JOB_LOG_KEEP = 400      # console lines kept per job (a long playlist logs per second)
+
+
+def _log_to(job, entry):
+    """Append one console line to a job, with the list kept bounded.
+
+    `log_total` counts every line ever appended, so the UI's `since` cursor and
+    the delta endpoints stay correct after old lines are dropped from the front.
+    """
+    lines = job.setdefault("log", [])
+    lines.append(entry)
+    # A job may already carry seed lines (with no counter yet), so fall back to
+    # the length *before* this append.
+    total = job.get("log_total", len(lines) - 1) + 1
+    job["log_total"] = total
+    overflow = len(lines) - _JOB_LOG_KEEP
+    if overflow > 0:
+        del lines[:overflow]
+    return total
+
+
+def _log_window(job, since):
+    """(lines, total) for a `since` cursor, given old lines may be gone."""
+    lines = job.get("log", [])
+    total = job.get("log_total", len(lines))
+    start = max(0, min(len(lines), len(lines) - (total - max(0, int(since or 0)))))
+    return lines[start:], total
+
+
+def _prune_jobs():
+    """Keep the in-memory job table bounded.
+
+    The desktop worker is a long-lived process: every download used to add a
+    job with an unbounded log list and nothing ever removed it, so a day of
+    heavy use slowly grew memory until the worker was killed (which the shell
+    reports as an unexplained crash).
+    """
+    try:
+        if len(_jobs) <= _JOBS_KEEP:
+            return
+        now = time.time()
+
+        def age(job):
+            """Seconds since the job finished.
+
+            `_ytdlp_run` flips `done` a moment before the worker thread stamps
+            `ended_at`, so a job mid-close-out still reads ended_at=0. Dating it
+            from 0 makes it look months old and it gets dropped while the UI is
+            still polling it (a download "vanishes" from the progress panel) —
+            hence the fallback to created_at.
+            """
+            return now - (job.get("ended_at") or job.get("created_at") or now)
+
+        finished = sorted((jid for jid, job in _jobs.items() if job.get("done")),
+                          key=lambda jid: age(_jobs[jid]))
+        victims = [jid for jid in finished if age(_jobs[jid]) > _JOBS_TTL]
+
+        def _drop_to(candidates, floor):
+            for jid in candidates:
+                if len(_jobs) - len(victims) <= floor:
+                    return
+                if jid not in victims:
+                    victims.append(jid)
+
+        # Over the cap, drop the oldest finished jobs — but only ones the UI has
+        # had time to stop reading.
+        _drop_to([jid for jid in finished if age(_jobs[jid]) > _JOBS_GRACE], _JOBS_KEEP)
+        # Hard ceiling, so a huge burst (a whole playlist) cannot park thousands
+        # of job dicts in memory just because they are all still inside the grace.
+        _drop_to(finished, _JOBS_HARD_KEEP)
+        for jid in victims:
+            _jobs.pop(jid, None)
+    except Exception as e:  # pruning must never break a download
+        log("DL", f"job prune skipped: {e}")
 
 _WIN_RESERVED = {"CON","PRN","AUX","NUL","COM1","COM2","COM3","COM4","COM5",
                  "COM6","COM7","COM8","COM9","LPT1","LPT2","LPT3","LPT4",
@@ -328,10 +633,11 @@ def register():
     if not pw or len(pw)<6: return jsonify(error="Password must be 6+ characters"),400
     if not name: return jsonify(error="Name required"),400
     if email in accs: return jsonify(error="Account already exists"),409
-    accs[email]={"name":name,"pw_hash":hashpw(pw),"joined":str(datetime.date.today()),
-                 "method":"email","prefs":{},"username":"","bio":"","avatar":"","banner":"",
-                 "image_history":[]}
-    jsave(ACCS_FILE,accs)
+    with _DATA_LOCK:
+        accs[email]={"name":name,"pw_hash":hashpw(pw),"joined":str(datetime.date.today()),
+                     "method":"email","prefs":{},"username":"","bio":"","avatar":"","banner":"",
+                     "image_history":[]}
+        jsave(ACCS_FILE,accs)
     return _user_resp(email, accs[email])
 
 @app.route("/api/login", methods=["POST"])
@@ -421,7 +727,11 @@ def save_prefs():
     email=d.get("user","").strip().lower(); prefs=d.get("prefs",{})
     accs=jload(ACCS_FILE,{})
     if email not in accs: return jsonify(error="User not found"),404
-    accs[email]["prefs"]=prefs; jsave(ACCS_FILE,accs)
+    with _DATA_LOCK:
+        accs = jload(ACCS_FILE, {})          # re-read inside the lock
+        if email not in accs: return jsonify(error="User not found"),404
+        accs[email]["prefs"]=prefs
+        jsave(ACCS_FILE,accs)
     return jsonify(ok=True)
 
 # ── History (Files / Favorites / Trash) ───────────────────────────────────────
@@ -438,11 +748,12 @@ def get_history():
 def clear_history():
     """Move ALL of the user's entries to Trash (restorable, not gone)."""
     email=request.args.get("user","")
-    hist=jload(HIST_FILE,[])
-    for h in hist:
-        if h.get("user")==email:
-            h["trashed"]=True
-    jsave(HIST_FILE,hist)
+    with _DATA_LOCK:
+        hist=jload(HIST_FILE,[])
+        for h in hist:
+            if h.get("user")==email:
+                h["trashed"]=True
+        jsave(HIST_FILE,hist)
     log("HIST", f"Moved all history to trash for {email}")
     return jsonify(ok=True)
 
@@ -451,11 +762,12 @@ def remove_history_item():
     """Move entry to Trash (restorable). Permanent delete lives in Trash tab."""
     d=request.json or {}
     email=d.get("user",""); url=d.get("url","")
-    hist=jload(HIST_FILE,[])
-    for h in hist:
-        if _hist_match(h,email,url):
-            h["trashed"]=True
-    jsave(HIST_FILE,hist)
+    with _DATA_LOCK:
+        hist=jload(HIST_FILE,[])
+        for h in hist:
+            if _hist_match(h,email,url):
+                h["trashed"]=True
+        jsave(HIST_FILE,hist)
     return jsonify(ok=True)
 
 @app.route("/api/history/delete", methods=["POST"])
@@ -463,26 +775,29 @@ def delete_history_forever():
     """Permanently delete an entry (from the Trash tab)."""
     d=request.json or {}
     email=d.get("user",""); url=d.get("url","")
-    jsave(HIST_FILE,[h for h in jload(HIST_FILE,[])
-                     if not _hist_match(h,email,url)])
+    with _DATA_LOCK:
+        jsave(HIST_FILE,[h for h in jload(HIST_FILE,[])
+                         if not _hist_match(h,email,url)])
     return jsonify(ok=True)
 
 @app.route("/api/history/restore", methods=["POST"])
 def restore_history_item():
     d=request.json or {}
     email=d.get("user",""); url=d.get("url","")
-    hist=jload(HIST_FILE,[])
-    for h in hist:
-        if _hist_match(h,email,url):
-            h["trashed"]=False
-    jsave(HIST_FILE,hist)
+    with _DATA_LOCK:
+        hist=jload(HIST_FILE,[])
+        for h in hist:
+            if _hist_match(h,email,url):
+                h["trashed"]=False
+        jsave(HIST_FILE,hist)
     return jsonify(ok=True)
 
 @app.route("/api/history/empty-trash", methods=["DELETE"])
 def empty_trash():
     email=request.args.get("user","")
-    jsave(HIST_FILE,[h for h in jload(HIST_FILE,[])
-                     if not(h.get("user")==email and h.get("trashed"))])
+    with _DATA_LOCK:
+        jsave(HIST_FILE,[h for h in jload(HIST_FILE,[])
+                         if not(h.get("user")==email and h.get("trashed"))])
     log("HIST", f"Emptied trash for {email}")
     return jsonify(ok=True)
 
@@ -490,13 +805,14 @@ def empty_trash():
 def star_history_item():
     d=request.json or {}
     email=d.get("user",""); url=d.get("url","")
-    hist=jload(HIST_FILE,[])
     starred=False
-    for h in hist:
-        if _hist_match(h,email,url):
-            h["starred"]=not h.get("starred",False)
-            starred=h["starred"]
-    jsave(HIST_FILE,hist)
+    with _DATA_LOCK:
+        hist=jload(HIST_FILE,[])
+        for h in hist:
+            if _hist_match(h,email,url):
+                h["starred"]=not h.get("starred",False)
+                starred=h["starred"]
+        jsave(HIST_FILE,hist)
     return jsonify(ok=True,starred=starred)
 
 # ── Spotify download via spotdl ───────────────────────────────────────────────
@@ -526,6 +842,34 @@ def _spotify_title(url, timeout=15):
         pass
     return ""
 
+def _find_bundled_binary(name):
+    """Locate a helper executable IDLR ships next to its own binary.
+
+    The bundled worker may end up in `.../binaries/` (one-file layout) or
+    `.../binaries/idlr-worker/` (folder layout, which antivirus heuristics
+    complain about far less). Search both instead of assuming the file sits
+    right next to us — a missing helper must never look like a crash.
+    """
+    try:
+        base = Path(os.path.dirname(sys.executable)).resolve()
+    except Exception:
+        return None
+    candidates = []
+    for folder in [base, *list(base.parents)[:3]]:
+        candidates.append(folder / name)
+        candidates.append(folder / "binaries" / name)
+        candidates.append(folder / Path(name).stem / name)
+    seen = set()
+    for candidate in candidates:
+        key = str(candidate).lower() if os.name == "nt" else str(candidate)
+        if key in seen:
+            continue
+        seen.add(key)
+        if candidate.is_file():
+            return str(candidate)
+    return None
+
+
 def _spotify_run(job, url, savepath, user, fmt, quality="320k", job_id="?", want_thumb=True):
     """Download Spotify track/album/playlist.
 
@@ -540,7 +884,7 @@ def _spotify_run(job, url, savepath, user, fmt, quality="320k", job_id="?", want
         log("SPOTIFY", f"[{job_id}] spotdl engine flagged broken — going straight to YouTube-match fallback")
         return _spotify_yt_fallback(job, url, savepath, user, fmt, quality, job_id, want_thumb,
                                     "Spotify engine (spotdl) is broken on this PC")
-    job["log"].append({"t":"Detected Spotify link — using spotdl…","c":"dim"})
+    _log_to(job, {"t":"Detected Spotify link — using spotdl…","c":"dim"})
     job["status"]="downloading"
 
     title = url
@@ -561,17 +905,18 @@ def _spotify_run(job, url, savepath, user, fmt, quality="320k", job_id="?", want
         pass
 
     try:
+        refresh_ffmpeg_paths()
         if getattr(sys, "frozen", False):
             worker_name = "IDLR-spotdl.exe" if os.name == "nt" else "IDLR-spotdl"
-            worker_path = os.path.join(os.path.dirname(sys.executable), worker_name)
-            if not os.path.isfile(worker_path):
-                raise FileNotFoundError(f"Bundled Spotify helper is missing: {worker_path}")
+            worker_path = _find_bundled_binary(worker_name)
+            if worker_path is None:
+                raise FileNotFoundError(
+                    f"Bundled Spotify helper is missing next to {sys.executable} — "
+                    "Windows Defender may have quarantined it."
+                )
             cmd = [worker_path]
         else:
             cmd = [sys.executable, "-m", "spotdl"]
-        cmd += ["--output", savepath,
-                "--format", audio_fmt,
-                "--bitrate", bitrate]
         help_result = subprocess.run(
             cmd + ["--help"],
             capture_output=True,
@@ -582,6 +927,9 @@ def _spotify_run(job, url, savepath, user, fmt, quality="320k", job_id="?", want
         help_text = (help_result.stdout or "") + "\n" + (help_result.stderr or "")
         if help_result.returncode != 0:
             raise RuntimeError(f"Could not inspect spotdl options: {help_text[-300:]}")
+        # Build the real command once, from the options this spotdl version
+        # actually advertises. (It used to be built twice, so every flag was
+        # passed two or three times and an unsupported one could not be dropped.)
         if "--format" in help_text:
             cmd += ["--format", audio_fmt]
         elif "--output-format" in help_text:
@@ -592,7 +940,7 @@ def _spotify_run(job, url, savepath, user, fmt, quality="320k", job_id="?", want
         if "--bitrate" in help_text:
             cmd += ["--bitrate", bitrate]
         else:
-            job["log"].append({
+            _log_to(job, {
                 "t": "This bundled spotdl version uses its default bitrate.",
                 "c": "dim",
             })
@@ -601,7 +949,7 @@ def _spotify_run(job, url, savepath, user, fmt, quality="320k", job_id="?", want
         # machines where only static-ffmpeg provides it (FFmpegError).
         if FFMPEG and "--ffmpeg" in help_text:
             cmd += ["--ffmpeg", FFMPEG]
-        cmd += [url]
+        cmd += ["download", url] if "download" in help_text else [url]
         log("SPOTIFY", f"[{job_id}] Running spotdl for {audio_fmt} ...")
         result = subprocess.run(
             cmd, capture_output=True, text=True, timeout=900,
@@ -614,11 +962,11 @@ def _spotify_run(job, url, savepath, user, fmt, quality="320k", job_id="?", want
             if not s:
                 continue
             if any(k in s for k in ("Downloaded", "Skipping", "Found", "Searching")):
-                job["log"].append({"t": s[:160], "c":"ok"})
+                _log_to(job, {"t": s[:160], "c":"ok"})
                 log("SPOTIFY", f"[{job_id}] {s[:160]}")
                 shown += 1
             elif any(k in s for k in ("Error", "Failed", "Traceback", "WARNING")):
-                job["log"].append({"t": s[:160], "c":"err"})
+                _log_to(job, {"t": s[:160], "c":"err"})
                 log("SPOTIFY", f"[{job_id}] !! {s[:200]}")
                 shown += 1
             if shown > 30:
@@ -627,13 +975,13 @@ def _spotify_run(job, url, savepath, user, fmt, quality="320k", job_id="?", want
         ok = result.returncode == 0 or "Downloaded" in out
         if ok:
             job.update({"status":"done","progress":100,"done":True})
-            job["log"].append({"t":f"✓ Spotify download saved to {savepath}","c":"ok"})
+            _log_to(job, {"t":f"✓ Spotify download saved to {savepath}","c":"ok"})
             log("SPOTIFY", f"[{job_id}] DONE -> {savepath}")
             _save_hist(user, url, title, thumb, "Audio Only", quality, audio_fmt, "done")
             return
         tail = "\n".join([l for l in out.split("\n") if l.strip()][-6:])
         log("SPOTIFY", f"[{job_id}] spotdl FAILED (exit {result.returncode}) — trying YouTube-match fallback")
-        job["log"].append({"t":"spotdl failed — trying YouTube match instead…","c":"dim"})
+        _log_to(job, {"t":"spotdl failed — trying YouTube match instead…","c":"dim"})
         return _spotify_yt_fallback(job, url, savepath, user, fmt, quality, job_id, want_thumb,
                                     _friendly_dl_error(tail or "spotdl failed"))
     except subprocess.TimeoutExpired:
@@ -648,7 +996,7 @@ def _spotify_yt_fallback(job, url, savepath, user, fmt, quality, job_id, want_th
     if not title:
         raise Exception(f"{why}. Spotify is also blocking title lookup right now — paste the YouTube link for this song instead.")
     log("SPOTIFY", f"[{job_id}] Fallback match: {title}")
-    job["log"].append({"t":f"Fallback: matched '{title[:60]}' on YouTube","c":"dim"})
+    _log_to(job, {"t":f"Fallback: matched '{title[:60]}' on YouTube","c":"dim"})
     job["title"] = title + " (YouTube match)"
     # ytsearch1: is a first-class yt-dlp URL; reuse the whole audio pipeline.
     return _ytdlp_run(job, f"ytsearch1:{title}", "Audio Only", quality, fmt,
@@ -717,8 +1065,9 @@ def _ytdlp_run(job, url, mode, quality, fmt, savepath, user,
     log("YT-DLP", f"[{job_id}] {url}")
     log("YT-DLP", f"[{job_id}] mode={mode} quality={quality} format={fmt} thumb={'on' if want_thumb else 'off'} playlist_all={'on' if playlist_all else 'off'}")
     log("YT-DLP", f"[{job_id}] Target folder: {savepath}")
+    refresh_ffmpeg_paths()
     if not FFMPEG:
-        job["log"].append({"t":"⚠ FFmpeg not found — merging/MP3 may fail. Install FFmpeg.","c":"err"})
+        _log_to(job, {"t":"⚠ FFmpeg not found — merging/MP3 may fail. Install FFmpeg.","c":"err"})
         log("YT-DLP", f"[{job_id}] WARNING: FFmpeg not found on PATH")
 
     # Use movie-grade opts for all downloads (HLS support, browser headers)
@@ -754,7 +1103,7 @@ def _ytdlp_run(job, url, mode, quality, fmt, savepath, user,
     if is_hls_or_direct(url):
         opts["format"] = "best"
         opts["merge_output_format"] = "mp4"
-        job["log"].append({"t":"🎬 Direct stream detected — using HLS downloader","c":"dim"})
+        _log_to(job, {"t":"🎬 Direct stream detected — using HLS downloader","c":"dim"})
 
     title = url; thumb = ""
     try:
@@ -787,10 +1136,10 @@ def _ytdlp_run(job, url, mode, quality, fmt, savepath, user,
                     thumb = info["thumbnails"][-1].get("url","")
                 job["title"] = title
                 job["thumb"] = thumb
-                job["log"].append({"t": title, "c":"dim"})
+                _log_to(job, {"t": title, "c":"dim"})
                 log("YT-DLP", f"[{job_id}] Found: {title[:80]}")
             except Exception as me:
-                job["log"].append({"t": f"Metadata: {_friendly_dl_error(str(me))[:90]}","c":"dim"})
+                _log_to(job, {"t": f"Metadata: {_friendly_dl_error(str(me))[:90]}","c":"dim"})
                 log("YT-DLP", f"[{job_id}] Metadata lookup failed: {str(me)[:120]}")
 
         job["status"] = "downloading"
@@ -799,26 +1148,60 @@ def _ytdlp_run(job, url, mode, quality, fmt, savepath, user,
             y.download([url])
 
         job.update({"status":"done","progress":100,"done":True})
-        job["log"].append({"t": f"✓ Saved to {savepath}","c":"ok"})
+        _log_to(job, {"t": f"✓ Saved to {savepath}","c":"ok"})
         log("YT-DLP", f"[{job_id}] DONE -> {savepath}")
         _save_hist(user, url, title, thumb, mode, quality, fmt, "done")
 
     except Exception as e:
         err_msg = _friendly_dl_error(str(e))
         job.update({"status":"error","error":err_msg,"done":True})
-        job["log"].append({"t": f"✗ {err_msg}","c":"err"})
+        _log_to(job, {"t": f"✗ {err_msg}","c":"err"})
         log("YT-DLP", f"[{job_id}] FAILED: {err_msg}")
         _save_hist(user, url, title, thumb, mode, quality, fmt, "error")
 
+def _trim_history(hist):
+    """Bound history.json, keeping the rows the user cares about.
+
+    The UI only ever reads the newest 120 rows per user, so a history file in
+    the tens of MBs just makes every save slower. Starred and trashed rows are
+    protected: they are things the user asked for explicitly, and silently
+    deleting them would look like data loss.
+    """
+    overflow = len(hist) - _HISTORY_CAP
+    if overflow <= 0:
+        return hist
+    kept = []
+    for item in hist:
+        if overflow > 0 and not item.get("starred") and not item.get("trashed"):
+            overflow -= 1
+            continue
+        kept.append(item)
+    return kept
+
+
 def _save_hist(user, url, title, thumb, mode, quality, fmt, status):
-    hist=jload(HIST_FILE,[])
-    entry={"user":user,"url":url,"title":title,"thumb":thumb,"mode":mode,
-           "quality":quality,"format":fmt,"status":status,
-           "starred":False,"trashed":False,
-           "date":datetime.datetime.now().strftime("%Y-%m-%d %H:%M")}
-    hist=[h for h in hist if not(h.get("user")==user and h.get("url")==url and h.get("mode")==mode)]
-    hist.append(entry)
-    jsave(HIST_FILE,hist)
+    # Locked end to end: jload/jsave are atomic on their own, but two downloads
+    # finishing together each started from the same snapshot and the later save
+    # silently dropped the earlier row (a download vanishing from History).
+    with _DATA_LOCK:
+        hist = jload(HIST_FILE, [])
+        entry={"user":user,"url":url,"title":title,"thumb":thumb,"mode":mode,
+               "quality":quality,"format":fmt,"status":status,
+               "starred":False,"trashed":False,
+               "date":datetime.datetime.now().strftime("%Y-%m-%d %H:%M")}
+        for item in hist:
+            if (item.get("user")==user and item.get("url")==url
+                    and item.get("mode")==mode):
+                # keep a star/trash state the user set while this download ran
+                entry["starred"] = bool(item.get("starred"))
+                entry["trashed"] = bool(item.get("trashed"))
+        # Re-downloading moves the row to "newest" rather than leaving a stale
+        # duplicate behind it, which is what the History list assumes.
+        hist = [h for h in hist
+                if not(h.get("user")==user and h.get("url")==url
+                       and h.get("mode")==mode)]
+        hist.append(entry)
+        jsave(HIST_FILE, _trim_history(hist))
 
 def _job_sidecars(savepath, title):
     """Leftover fragment/part files belonging to one download (same title).
@@ -887,7 +1270,9 @@ def start_download():
 
     jid=str(uuid.uuid4())[:8]
     _jobs[jid]={"status":"starting","progress":0,"speed":"","eta":"",
-                "log":[],"title":"","thumb":"","error":None,"done":False}
+                "log":[],"title":"","thumb":"","error":None,"done":False,
+                "created_at":time.time(),"ended_at":0}
+    _prune_jobs()
     log("DL", f"[{jid}] NEW user={user or 'guest'} mode={mode} quality={quality} format={fmt}")
     log("DL", f"[{jid}] URL: {url[:140]}")
 
@@ -902,12 +1287,18 @@ def start_download():
         except Exception as e:
             msg = _friendly_dl_error(str(e))
             job.update({"status":"error","error":msg,"done":True})
-            job["log"].append({"t":f"✗ {msg}","c":"err"})
+            _log_to(job, {"t":f"✗ {msg}","c":"err"})
             log("DL", f"[{jid}] FAILED: {msg}")
             try: _save_hist(user, url, job.get("title") or url, job.get("thumb",""),
                             mode, quality, fmt, "error")
             except Exception: pass
         finally:
+            # A job that never reports back leaves the UI stuck on
+            # "Downloading…" forever, so always close it out here.
+            if not job.get("done"):
+                job.update({"status":"error","done":True,
+                            "error":job.get("error") or "The download stopped before it finished. Try again."})
+            job["ended_at"] = time.time()
             # One download = one file: drop this job's sidecars (fragments /
             # .part residue). yt-dlp already cleans on success; this covers
             # failures and interrupted runs.
@@ -919,6 +1310,7 @@ def start_download():
                         except Exception: pass
             except Exception:
                 pass
+            _prune_jobs()
 
     threading.Thread(target=run, daemon=True).start()
     return jsonify(job_id=jid)
@@ -935,7 +1327,7 @@ def _hook(job, d):
                         "eta":d.get("_eta_str","").strip()})
         elif d["status"]=="finished":
             job["status"]="merging"
-            job["log"].append({"t":"Merging video + audio…","c":"dim"})
+            _log_to(job, {"t":"Merging video + audio…","c":"dim"})
     except Exception:
         pass
 
@@ -943,10 +1335,13 @@ def _hook(job, d):
 def progress(jid):
     def stream():
         ll=0
-        while True:
+        # This endpoint holds an open connection; without a deadline a job that
+        # never reports back keeps its handler thread alive forever.
+        deadline = time.time() + 6 * 3600
+        while time.time() < deadline:
             job=_jobs.get(jid)
             if not job: yield f"data:{json.dumps({'error':'not found'})}\n\n"; break
-            new=job["log"][ll:]; ll=len(job["log"])
+            new,ll=_log_window(job, ll)
             yield f"data:{json.dumps({'status':job['status'],'progress':job['progress'],'speed':job['speed'],'eta':job['eta'],'title':job['title'],'thumb':job.get('thumb',''),'logs':new,'done':job['done'],'error':job['error']})}\n\n"
             if job["done"]: break
             time.sleep(0.3)
@@ -963,6 +1358,10 @@ def progress_state(jid):
         since = max(0, int(request.args.get("since", "0")))
     except ValueError:
         return jsonify(error="Invalid progress cursor."),400
+    # `since` counts every line ever logged, not the retained window, so the
+    # cursor still works after _log_to() trims old lines (and the frontend's
+    # Math.max() on log_count never sees the number go backwards).
+    lines, total = _log_window(job, since)
     return jsonify(
         status=job["status"],
         progress=job["progress"],
@@ -970,8 +1369,8 @@ def progress_state(jid):
         eta=job["eta"],
         title=job["title"],
         thumb=job.get("thumb", ""),
-        logs=job["log"][since:],
-        log_count=len(job["log"]),
+        logs=lines,
+        log_count=total,
         done=job["done"],
         error=job["error"],
     )
@@ -1094,7 +1493,11 @@ def info():
                    network=SERVER_URL,
                    frozen=bool(getattr(sys, "frozen", False)),
                    active_ytdlp_update=_ACTIVE_UPDATED_YTDLP,
-                   pending_ytdlp_update=_PENDING_UPDATED_YTDLP)
+                   pending_ytdlp_update=_PENDING_UPDATED_YTDLP,
+                   spotify_engine=("youtube-fallback" if "spotdl" in BROKEN_PKGS else "spotdl"),
+                   problems=list(SETUP_PROBLEMS),
+                   data_dir=APP_DIR,
+                   log_file=LOG_FILE)
 
 @app.route("/api/validate-save-path", methods=["POST"])
 def validate_save_path():
@@ -1133,12 +1536,13 @@ def delete_account():
     d = request.json or {}
     email = (d.get("user") or "").strip().lower()
     if not email: return jsonify(error="Missing user"),400
-    accs = jload(ACCS_FILE, {})
-    if email not in accs: return jsonify(error="Account not found"),404
-    del accs[email]
-    jsave(ACCS_FILE, accs)
-    hist = [h for h in jload(HIST_FILE,[]) if h.get("user")!=email]
-    jsave(HIST_FILE, hist)
+    with _DATA_LOCK:
+        accs = jload(ACCS_FILE, {})
+        if email not in accs: return jsonify(error="Account not found"),404
+        del accs[email]
+        jsave(ACCS_FILE, accs)
+        hist = [h for h in jload(HIST_FILE,[]) if h.get("user")!=email]
+        jsave(HIST_FILE, hist)
     log("AUTH", f"Deleted account: {email}")
     return jsonify(ok=True)
 

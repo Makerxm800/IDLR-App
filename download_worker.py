@@ -3,10 +3,51 @@
 import json
 import sys
 
+# Keep the real stdout for the JSON-line protocol; everything the app prints
+# while running must not corrupt it, so normal output is redirected to stderr
+# (which the desktop shell records in IDLR's log).
 rpc_stdout = sys.stdout
 sys.stdout = sys.stderr
 
-import app as idlr
+
+def reply(payload):
+    """Write one response line. A dead pipe means the app closed, so stop."""
+    try:
+        rpc_stdout.write(json.dumps(payload, separators=(",", ":")) + "\n")
+        rpc_stdout.flush()
+    except (OSError, ValueError):
+        raise SystemExit(0)
+
+
+def _startup_failure(exc):
+    """Answer requests with the real reason instead of dying silently.
+
+    When `import app` fails — a missing or quarantined dependency, a broken
+    bundled FFmpeg — the old behaviour was a traceback nobody could see (stderr
+    was sent to NUL) and a UI stuck on 'Starting…' forever.
+    """
+    message = (
+        "IDLR's download helper could not start: "
+        f"{type(exc).__name__}: {exc} "
+        "(If a security product quarantined IDLR's files, restore them and reinstall.)"
+    )
+    while True:
+        line = sys.stdin.readline()
+        if not line:
+            return
+        try:
+            request_id = json.loads(line).get("id")
+        except ValueError:
+            request_id = None
+        reply({"id": request_id, "status": 503, "body": {"error": message, "code": "worker_broken"}})
+
+
+try:
+    import app as idlr
+except BaseException as exc:  # noqa: BLE001 - any import failure must be reported, not swallowed
+    print(f"IDLR worker failed to start: {type(exc).__name__}: {exc}", file=sys.stderr, flush=True)
+    _startup_failure(exc)
+    raise SystemExit(1)
 
 
 def handle_message(message):
@@ -46,5 +87,4 @@ for line in sys.stdin:
             "status": 500,
             "body": {"error": str(exc)},
         }
-    rpc_stdout.write(json.dumps(result, separators=(",", ":")) + "\n")
-    rpc_stdout.flush()
+    reply(result)
