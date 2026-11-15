@@ -9,7 +9,7 @@ import io
 import importlib.util
 from pathlib import Path
 
-APP_VERSION = "2.0.7"
+APP_VERSION = "2.0.8"
 APP_DIR = os.path.join(os.path.expanduser("~"), ".idlr_app")
 os.makedirs(APP_DIR, exist_ok=True)
 _YTDLP_UPDATE_STATE = os.path.join(APP_DIR, "ytdlp-update.json")
@@ -103,7 +103,91 @@ def report_issue(package, title, detail, severity, reason=""):
                            "severity": severity, "reason": str(reason or "")[:300]})
     log("SETUP", f"  [{'WARN' if severity == 'notice' else '!!'}] {package}: {title}"
                  + (f" ({str(reason)[:110]})" if reason else ""))
+
+
 IS_FROZEN = bool(getattr(sys, "frozen", False))
+
+
+def _find_bundled_binary(name):
+    """Locate a helper executable IDLR ships next to its own binary.
+
+    The bundled worker may end up in `.../binaries/` (one-file layout) or
+    `.../binaries/idlr-worker/` (folder layout, which antivirus heuristics
+    complain about far less). Search both instead of assuming the file sits
+    right next to us — a missing helper must never look like a crash.
+    """
+    try:
+        base = Path(os.path.dirname(sys.executable)).resolve()
+    except Exception:
+        return None
+    candidates = []
+    for folder in [base, *list(base.parents)[:3]]:
+        candidates.append(folder / name)
+        candidates.append(folder / "binaries" / name)
+        candidates.append(folder / Path(name).stem / name)
+    seen = set()
+    for candidate in candidates:
+        key = str(candidate).lower() if os.name == "nt" else str(candidate)
+        if key in seen:
+            continue
+        seen.add(key)
+        if candidate.is_file():
+            return str(candidate)
+    return None
+
+
+SPOTDL_HELPER = "IDLR-spotdl.exe" if os.name == "nt" else "IDLR-spotdl"
+
+
+def _bundled_spotdl_answers(timeout=25):
+    """Ask the helper that will do the work whether it can, without importing it.
+
+    In the packaged app `spotdl` is *deliberately* not importable in this process:
+    build.py freezes it into its own `IDLR-spotdl` helper, because importing it
+    costs ~1.3 s and drags fastapi, mutagen, aiohttp and ytmusicapi into every
+    launch. Judging Spotify health by this process's own import machinery
+    therefore reported "Spotify's own downloader is unavailable" — orange strip,
+    YouTube-match badge, the lot — for every installed user, while Spotify
+    downloads worked fine the whole time.
+
+    `--help` is the same handshake `_spotify_run` performs before building a real
+    command, so this probe can only be wrong in cases where the download would
+    also be wrong. That is the property that matters: a health banner nobody
+    trusts is worse than no banner.
+    """
+    helper = _find_bundled_binary(SPOTDL_HELPER)
+    if helper is None:
+        return False, (f"the bundled Spotify helper is not beside {sys.executable} "
+                       "(a security product may have quarantined it)")
+    try:
+        result = subprocess.run([helper, "--help"], capture_output=True, text=True,
+                                timeout=timeout,
+                                creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+    except Exception as exc:
+        return False, f"{type(exc).__name__}: {exc}"
+    if result.returncode != 0:
+        tail = ((result.stderr or "") + "\n" + (result.stdout or "")).strip()[-200:]
+        return False, f"IDLR-spotdl exited {result.returncode}: {tail or 'with no output'}"
+    return True, ""
+
+
+def _dependency_present(pkg, module):
+    """Cheap, import-time answer to "can this optional feature possibly work?".
+
+    Returns (ok, reason). Never imports anything and never runs a subprocess:
+    this sits on the startup path, on a cold Windows start, inside files
+    antivirus is scanning.
+    """
+    if IS_FROZEN and pkg == "spotdl":
+        found = _find_bundled_binary(SPOTDL_HELPER) is not None
+        return found, "" if found else "IDLR-spotdl is not next to the app"
+    try:
+        if importlib.util.find_spec(module) is None:
+            return False, f"{pkg} is not installed"
+        return True, ""
+    except (ImportError, ValueError) as exc:
+        # A half-removed distribution can raise here rather than return None.
+        return False, f"{type(exc).__name__}: {exc}"
 
 
 def _pip_install(pkg, timeout=180):
@@ -133,8 +217,12 @@ for p, i in [("flask", "flask"), ("yt-dlp", "yt_dlp"),
             # Spotify link, which runs in its own child process anyway. On a
             # cold Windows start with antivirus scanning the extracted files
             # that import was a visible chunk of "IDLR takes forever to open".
-            if importlib.util.find_spec(i) is None:
-                raise ImportError(f"{p} is not installed")
+            # In the packaged build the answer also has to come from the helper
+            # that owns the dependency, not from this process — see
+            # _dependency_present().
+            ok, reason = _dependency_present(p, i)
+            if not ok:
+                raise ImportError(reason or f"{p} is not installed")
         else:
             __import__(i)
         log("SETUP", f"  [OK] {p} already installed")
@@ -385,13 +473,24 @@ def _finish_startup_checks():
     try:
         for pkg, module in OPTIONAL_IMPORTS.items():
             try:
-                imported = __import__(module)
-                if module == "static_ffmpeg":
-                    static_ffmpeg = imported
+                if IS_FROZEN and pkg == "spotdl":
+                    # `import spotdl` here would be the same wrong question the
+                    # startup probe asked; the helper is the only thing that can
+                    # answer it. Runs in this thread, not on the startup path.
+                    ok, reason = _bundled_spotdl_answers()
+                    if not ok:
+                        raise RuntimeError(reason)
+                else:
+                    imported = __import__(module)
+                    if module == "static_ffmpeg":
+                        static_ffmpeg = imported
             except Exception as e:
                 if pkg in BROKEN_PKGS:
                     continue
                 BROKEN_PKGS.add(pkg)
+                if IS_FROZEN and pkg == "spotdl":
+                    log("SETUP", "  [!!] Spotify helper check failed; Spotify links "
+                                 "will be matched on YouTube")
                 if pkg == "spotdl":
                     report_issue("spotdl", "Spotify's own downloader is unavailable",
                                  "Spotify links still download — IDLR matches the track "
@@ -1063,34 +1162,6 @@ def _spotify_title(url, timeout=15):
     except Exception:
         pass
     return ""
-
-def _find_bundled_binary(name):
-    """Locate a helper executable IDLR ships next to its own binary.
-
-    The bundled worker may end up in `.../binaries/` (one-file layout) or
-    `.../binaries/idlr-worker/` (folder layout, which antivirus heuristics
-    complain about far less). Search both instead of assuming the file sits
-    right next to us — a missing helper must never look like a crash.
-    """
-    try:
-        base = Path(os.path.dirname(sys.executable)).resolve()
-    except Exception:
-        return None
-    candidates = []
-    for folder in [base, *list(base.parents)[:3]]:
-        candidates.append(folder / name)
-        candidates.append(folder / "binaries" / name)
-        candidates.append(folder / Path(name).stem / name)
-    seen = set()
-    for candidate in candidates:
-        key = str(candidate).lower() if os.name == "nt" else str(candidate)
-        if key in seen:
-            continue
-        seen.add(key)
-        if candidate.is_file():
-            return str(candidate)
-    return None
-
 
 def _spotify_run(job, url, savepath, user, fmt, quality="320k", job_id="?", want_thumb=True):
     """Download Spotify track/album/playlist.

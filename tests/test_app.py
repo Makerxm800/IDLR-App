@@ -1,8 +1,10 @@
 import base64
+import builtins
 import hashlib
 import io
 import json
 import os
+import subprocess
 import tempfile
 import threading
 import time
@@ -482,6 +484,103 @@ class SetupIssueShapeTests(unittest.TestCase):
         # The UI decides banner vs dismissible notice from these keys alone.
         for key in ("version", "platform", "python", "data_dir"):
             self.assertIn(key, payload)
+
+
+class PackagedSpotifyProbeTests(unittest.TestCase):
+    """In the desktop build, `spotdl` is frozen into its own helper process.
+
+    The app used to answer "is Spotify available?" by asking its *own* import
+    machinery — `find_spec("spotdl")` at startup and `import spotdl` in the
+    background check — and in a packaged build that is always false, so every
+    installed user got the orange "Spotify's own downloader is unavailable" strip
+    and the YouTube-match badge while Spotify downloads worked fine. Health has
+    to be measured on the thing that does the work.
+    """
+
+    def setUp(self):
+        # These tests patch subprocess.run, which is a module-level object shared
+        # with the background startup thread: let that thread finish first, or it
+        # can trip the "spawned nothing" assertion with work of its own.
+        if not idlr._STARTUP_CHECKS.wait(15):
+            self.skipTest("the startup check thread never finished")
+        self.frozen = idlr.IS_FROZEN
+        self.finder = idlr._find_bundled_binary
+        self.broken = set(idlr.BROKEN_PKGS)
+        self.problems = list(idlr.SETUP_PROBLEMS)
+        idlr.BROKEN_PKGS.discard("spotdl")
+
+        def restore():
+            idlr.IS_FROZEN = self.frozen
+            idlr._find_bundled_binary = self.finder
+            idlr.BROKEN_PKGS.clear()
+            idlr.BROKEN_PKGS.update(self.broken)
+            while idlr.SETUP_PROBLEMS:
+                idlr.SETUP_PROBLEMS.pop()
+            idlr.SETUP_PROBLEMS.extend(self.problems)
+        self.addCleanup(restore)
+
+    def test_a_missing_helper_is_the_only_thing_that_can_call_spotdl_broken(self):
+        idlr.IS_FROZEN = True
+        idlr._find_bundled_binary = lambda name: None
+        ok, reason = idlr._dependency_present("spotdl", "spotdl")
+        self.assertFalse(ok)
+        self.assertIn("IDLR-spotdl", reason)
+
+    def test_the_startup_probe_imports_and_spawns_nothing(self):
+        """It runs at import time, on a cold start, inside scanned files."""
+        idlr.IS_FROZEN = True
+        idlr._find_bundled_binary = lambda name: None      # helper quarantined, say
+        with mock.patch.object(idlr.subprocess, "run") as run:
+            ok, reason = idlr._dependency_present("spotdl", "spotdl")
+        self.assertFalse(ok)
+        self.assertTrue(reason)
+        run.assert_not_called(), "even a missing helper must cost no subprocess"
+
+    def test_a_working_helper_outranks_an_unimportable_package(self):
+        idlr.IS_FROZEN = True
+        idlr._find_bundled_binary = lambda name: "/opt/idlr/IDLR-spotdl"
+        real_import = builtins.__import__
+
+        def exploding_import(name, *args, **kwargs):
+            if name == "spotdl":
+                raise ModuleNotFoundError("No module named 'spotdl'")
+            return real_import(name, *args, **kwargs)
+
+        done = subprocess.CompletedProcess([], 0, "usage: spotdl [options]", "")
+        with mock.patch("builtins.__import__", side_effect=exploding_import), \
+                mock.patch.object(idlr.subprocess, "run", return_value=done) as run:
+            self.assertEqual(idlr._dependency_present("spotdl", "spotdl"), (True, ""))
+            self.assertEqual(idlr._bundled_spotdl_answers(timeout=20), (True, ""))
+        argv = run.call_args[0][0]
+        self.assertEqual(argv, ["/opt/idlr/IDLR-spotdl", "--help"])
+        self.assertIs(run.call_args[1].get("shell", False) if run.call_args else False, False,
+                      "argv must stay a list: a helper name is not a shell command")
+
+    def test_a_helper_that_cannot_run_reports_its_own_error(self):
+        idlr.IS_FROZEN = True
+        idlr._find_bundled_binary = lambda name: "/opt/idlr/IDLR-spotdl"
+        done = subprocess.CompletedProcess([], 3, "", "ImportError: pydantic-core version mismatch")
+        with mock.patch.object(idlr.subprocess, "run", return_value=done):
+            ok, reason = idlr._bundled_spotdl_answers(timeout=20)
+        self.assertFalse(ok)
+        self.assertIn("pydantic-core", reason)     # the reason the user pastes into a bug report
+        self.assertIn("exited 3", reason)
+
+    def test_a_source_install_still_asks_the_import_path(self):
+        idlr.IS_FROZEN = False
+        idlr._find_bundled_binary = lambda name: None   # irrelevant when not bundled
+        self.assertEqual(idlr._dependency_present("spotdl", "spotdl"), (True, ""))
+        self.assertFalse(idlr._dependency_present("not-a-package", "not_a_package")[0])
+
+    def test_the_engine_label_follows_the_probe_not_the_import(self):
+        """`/api/info` is what paints the badge, so pin the whole chain."""
+        idlr.BROKEN_PKGS.discard("spotdl")
+        self.assertEqual(idlr.app.test_client().get("/api/info").get_json()["spotify_engine"],
+                         "spotdl")
+        idlr.BROKEN_PKGS.add("spotdl")
+        self.assertEqual(idlr.app.test_client().get("/api/info").get_json()["spotify_engine"],
+                         "youtube-fallback")
+        idlr.BROKEN_PKGS.discard("spotdl")
 
 
 if __name__ == "__main__":

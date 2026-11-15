@@ -132,8 +132,15 @@ class StartupCostTests(unittest.TestCase):
         startup = source.split('log("SETUP", "Application modules ready.')
         self.assertEqual(len(startup), 2, "the startup marker moved")
         startup = startup[0]
-        self.assertIn("importlib.util.find_spec(i)", startup,
-                      "startup should probe optional packages with find_spec()")
+        self.assertIn("_dependency_present(p, i)", startup,
+                      "startup should only *probe* optional packages: find_spec() in a "
+                      "source install, and the presence of the bundled helper in a packaged "
+                      "one. Importing them here cost ~1.3 s on every launch, and asking this "
+                      "process whether it can import spotdl was also flatly wrong in the "
+                      "installed app — spotdl lives in IDLR-spotdl. Spawning the helper is "
+                      "deferred to _finish_startup_checks(); that the probe runs no "
+                      "subprocess is pinned behaviourally in "
+                      "tests.test_app.PackagedSpotifyProbeTests.")
         self.assertNotIn('("static-ffmpeg", "static_ffmpeg"), ("spotdl", "spotdl")]:\n    try:\n        __import__(i)',
                          startup, "the startup loop must not import every package serially")
         # Importing static-ffmpeg and looking for FFmpeg both cost time and can

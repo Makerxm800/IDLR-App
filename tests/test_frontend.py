@@ -38,12 +38,35 @@ def markup_without_scripts(html):
     return re.sub(r"<script\b.*?</script>", "", html, flags=re.DOTALL | re.IGNORECASE)
 
 
+def without_css_comments(css):
+    """CSS minus its `/* */` prose.
+
+    Explanatory comments in this sheet quote the very declarations they justify, so
+    a test that greps the raw text passes on the comment while the actual rule has
+    been changed — which is how a guard for `overflow: hidden` stopped guarding.
+    """
+    return re.sub(r"/\*.*?\*/", "", css, flags=re.DOTALL)
+
+
+def text_the_user_can_read(html):
+    """Markup with `<script>` and `<style>` removed — what is actually on screen.
+
+    A glyph in a CSS comment is documentation; the same glyph in a sentence under
+    a switch is a promise about a control that may not exist.
+    """
+    out = re.sub(r"<style\b.*?</style>", "", markup_without_scripts(html),
+                 flags=re.DOTALL | re.IGNORECASE)
+    return re.sub(r"<!--.*?-->", "", out, flags=re.DOTALL)
+
+
 class FrontendConsistencyTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         cls.html = INDEX.read_text(encoding="utf-8")
         cls.markup = markup_without_scripts(cls.html)
         cls.ids = set(MARKUP_ID.findall(cls.markup))
+        cls.css = "\n".join(re.findall(r"<style\b[^>]*>(.*?)</style>", cls.html,
+                                        re.DOTALL | re.IGNORECASE))
 
     def test_every_static_element_id_lookup_exists(self):
         missing = sorted(
@@ -177,3 +200,110 @@ class FrontendConsistencyTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class PaintAndGeometryTests(unittest.TestCase):
+    """Two things every other test here was blind to.
+
+    The notification popover clipped its own last row because nothing capped the
+    panel, and the settings sheen painted a red band over the cards beside it
+    because the pseudo-element was never hidden and its row never clipped. Neither
+    is a missing id or a dangling handler: they only ever showed up as an app that
+    looked sloppy.
+
+    The assertions read the block that follows an exact selector rather than
+    parsing CSS. `index.html` keeps `@media` and `@keyframes` blocks, and any
+    brace-walking parser gets its selector/body pairs wrong immediately after
+    them — which is precisely where a duplicate rule likes to hide.
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        cls.html = INDEX.read_text(encoding="utf-8")
+        cls.markup = markup_without_scripts(cls.html)
+        cls.visible = text_the_user_can_read(cls.html)
+        cls.css = without_css_comments("\n".join(
+            re.findall(r"<style\b[^>]*>(.*?)</style>", cls.html, re.DOTALL | re.IGNORECASE)))
+
+    def block_after(self, marker, what):
+        start = self.css.find(marker)
+        self.assertNotEqual(start, -1, f"{marker!r} is gone — {what} is no longer checked")
+        open_brace = self.css.index("{", start)
+        return self.css[open_brace + 1:self.css.index("}", open_brace)]
+
+    def test_the_notifications_panel_is_capped_and_the_list_scrolls(self):
+        panel = self.block_after(".notif-popover {\n            width: min(392px",
+                                 "the notification popover's size")
+        self.assertIn("max-height", panel,
+                      "an uncapped popover grows past the bottom of the window and its "
+                      "own overflow:hidden eats the row you were reading")
+        self.assertIn("display: flex", panel)
+        self.assertEqual(
+            len(re.findall(r"\.notif-popover \.pop-body \.notif-list\s*\{", self.css)), 1,
+            "the list's geometry is declared more than once; whichever rule loses the "
+            "cascade decides which theme clips rows")
+        listed = self.block_after(".notif-popover .pop-body .notif-list {", "list scrolling")
+        for declaration in ("overflow-y: auto", "flex: 1", "min-height: 0"):
+            self.assertIn(declaration, listed,
+                          f"without `{declaration}` the list is not the scroller")
+
+    def test_the_hover_sheen_is_gated_on_hover_and_clipped_by_the_card(self):
+        row = self.block_after(".setting-row,\n        .theme-option {", "the settings row box")
+        self.assertIn("overflow: hidden", row,
+                      "the sheen band is a child of the row, so a row that does not clip "
+                      "lets the light sweep across its neighbours")
+        rest = self.block_after(".setting-row::after,\n        .theme-option::after {",
+                                "the sheen at rest")
+        hover = self.block_after(".setting-row:hover::after,", "the sheen on hover")
+        self.assertIn("opacity: 0", rest,
+                      "a sheen painted while nothing is hovered is the light effect users "
+                      "report as a bug")
+        self.assertNotIn("left:", rest,
+                         "`left` is a layout property: animating it reflows on every frame")
+        self.assertIn("translate3d", rest, "the sweep should move on the compositor")
+        self.assertIn("opacity: 1", hover)
+        self.assertIn("body.reduce-motion .setting-row::after", self.css,
+                      "Calm Motion has to switch the sweep off, not merely shorten it")
+
+    def test_nothing_animates_forever_behind_the_pages(self):
+        self.assertNotIn("glowMove", self.html,
+                         "an infinite 12s drift shows through every frosted panel and costs "
+                         "a compositor frame until the app is closed")
+        self.assertNotIn("animation", self.block_after(".glow {", "the ambient wash"),
+                         ".glow still animates")
+
+    def test_every_switch_row_has_the_parts_that_keep_it_honest(self):
+        """A row loses its sub-text, its detail or its info button one refactor at a
+        time, and the switch then quietly disagrees with its own caption."""
+        switches = re.findall(r'<div class="setting-row[^"]*" id="row-([\w-]+)"[^>]*role="switch"',
+                              self.markup)
+        self.assertGreaterEqual(len(switches), 8,
+                                "only found these switch rows: " + ", ".join(switches))
+        for key in switches:
+            parts = (
+                ("switch", 'id="toggle-' + key + '"'),
+                ("state text", 'id="sub-' + key + '"'),
+                ("detail text", 'id="det-' + key + '"'),
+                ("info button", 'id="info-btn-' + key + '"'),
+                ("handler", "onclick=" + chr(34) + "toggleSetting('" + key + "')" + chr(34)),
+                ("keyboard handler",
+                 "onkeydown=" + chr(34) + "toggleKey(event,'" + key + "')" + chr(34)),
+            )
+            for part, pattern in parts:
+                self.assertIn(pattern, self.markup, key + " has no " + part)
+            for table in ("_settingHints", "_settingSubs"):
+                body = re.search("const " + table + r" = \{(.*?)\};", self.html, re.DOTALL)
+                self.assertIsNotNone(body, table + " disappeared")
+                self.assertIn(key + ":", body.group(1), key + " is missing from " + table)
+
+    def test_settings_copy_describes_a_control_that_exists(self):
+        """The blurb used to say "tap ⓘ" when the control is an SVG info button, and
+        the alerts row promised an OS notification the webview may not deliver."""
+        self.assertNotIn("\u24d8", self.visible,
+                         "a sentence pointing at a glyph is not pointing at the icon button "
+                         "that is actually there")
+        self.assertIn("info button", self.visible)
+        for line in re.findall(r"dlNotif: \[[^\]]*\]", self.html):
+            self.assertNotIn("Notify when done", line,
+                             "promises a system notification from a toggle that only feeds "
+                             "the in-app list: " + line)
