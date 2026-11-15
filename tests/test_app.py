@@ -4,6 +4,7 @@ import hashlib
 import io
 import json
 import os
+from pathlib import Path
 import subprocess
 import tempfile
 import threading
@@ -14,6 +15,8 @@ from types import SimpleNamespace
 from unittest import mock
 
 import app as idlr
+
+ROOT = Path(__file__).resolve().parents[1]
 
 
 class IDLRApiTests(unittest.TestCase):
@@ -610,6 +613,79 @@ class PackagedSpotifyProbeTests(unittest.TestCase):
         self.assertEqual(idlr.app.test_client().get("/api/info").get_json()["spotify_engine"],
                          "youtube-fallback")
         idlr.BROKEN_PKGS.discard("spotdl")
+
+
+class IssueLifetimeTests(unittest.TestCase):
+    """`report_issue` only ever grows, so a one-off failure had to be out-voted.
+
+    The Spotify notice is raised from a *single* failed download (a helper that
+    prints a traceback), which is right for that moment and wrong forever after:
+    a session that then finished twenty Spotify links would still claim "Spotify's
+    own downloader is unavailable" — the stale-alarm mistake this UI was rebuilt
+    to stop making.
+    """
+
+    def setUp(self):
+        self.problems = list(idlr.SETUP_PROBLEMS)
+        self.broken = set(idlr.BROKEN_PKGS)
+
+        def restore():
+            while idlr.SETUP_PROBLEMS:
+                idlr.SETUP_PROBLEMS.pop()
+            idlr.SETUP_PROBLEMS.extend(self.problems)
+            idlr.BROKEN_PKGS.clear()
+            idlr.BROKEN_PKGS.update(self.broken)
+        self.addCleanup(restore)
+
+    def raise_one(self):
+        idlr.SETUP_PROBLEMS[:] = []
+        idlr.BROKEN_PKGS.add("spotdl")
+        idlr.report_issue("spotdl", "Spotify's own downloader is unavailable",
+                          "matched on YouTube instead", "notice",
+                          "RuntimeError: Traceback (most recent call last)")
+
+    def test_a_healthy_download_clears_the_notice(self):
+        self.raise_one()
+        idlr.clear_issue("spotdl")
+        self.assertEqual(idlr.SETUP_PROBLEMS, [])
+
+    def test_clearing_only_touches_the_package_that_recovered(self):
+        self.raise_one()
+        idlr.report_issue("flask", "flask is required but broken", "cannot start", "blocking")
+        idlr.clear_issue("spotdl")
+        self.assertEqual([problem["package"] for problem in idlr.SETUP_PROBLEMS], ["flask"],
+                         "a Spotify success says nothing about a missing required package")
+
+    def test_clearing_nothing_is_quiet(self):
+        idlr.SETUP_PROBLEMS[:] = []
+        idlr.clear_issue("spotdl")
+        self.assertEqual(idlr.SETUP_PROBLEMS, [])
+
+    def test_the_title_can_be_targeted(self):
+        self.raise_one()
+        idlr.clear_issue("spotdl", "some other complaint")
+        self.assertEqual(len(idlr.SETUP_PROBLEMS), 1, "an unrelated title must not clear this")
+        idlr.clear_issue("spotdl", "Spotify's own downloader is unavailable")
+        self.assertEqual(idlr.SETUP_PROBLEMS, [])
+
+    def test_it_is_the_successful_run_that_clears_it(self):
+        """Placement matters: clearing from anywhere makes the notice meaningless."""
+        source = (ROOT / "app.py").read_text(encoding="utf-8")
+        body = source.split("def _spotify_run(")[1].split("\ndef _spotify_yt_fallback")[0]
+        self.assertIn('clear_issue("spotdl")', body)
+        before = body.split('clear_issue("spotdl")')[0]
+        self.assertIn("_save_hist(", before,
+                      "the clear belongs after the download is confirmed and recorded")
+        self.assertEqual(body.count('clear_issue("spotdl")'), 1,
+                         "exactly one clear, and only on the path that saved a file")
+        success = body.split("if ok:")[1].split("tail =")[0]
+        self.assertIn('clear_issue("spotdl")', success,
+                      "clearing it anywhere else makes the notice meaningless")
+
+    def test_a_per_track_error_never_reaches_the_notice_in_the_first_place(self):
+        self.assertFalse(idlr._looks_like_engine_failure("ERROR: This video is private"))
+        self.assertTrue(idlr._looks_like_engine_failure(
+            "Traceback (most recent call last):\n  ImportError: No module named 'ytmusicapi'"))
 
 
 if __name__ == "__main__":

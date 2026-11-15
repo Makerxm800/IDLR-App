@@ -247,23 +247,44 @@ class PaintAndGeometryTests(unittest.TestCase):
             self.assertIn(declaration, listed,
                           f"without `{declaration}` the list is not the scroller")
 
-    def test_the_hover_sheen_is_gated_on_hover_and_clipped_by_the_card(self):
+    def test_the_hover_sheen_stays_in_its_own_box_without_eating_the_tooltip(self):
+        """The last release clipped the row to contain the sweep — and clipped the
+        tooltip with it.
+
+        `.toggle-switch::after` paints *above* the switch (it needs ~34px of room)
+        inside a row that offers ~21px, so `overflow: hidden` on `.setting-row` cut
+        `Full Playlist: Enabled` in half. The sweep is now a gradient painted inside
+        the pseudo-element's own box, so it cannot reach a neighbour and nothing has
+        to clip. Both halves are asserted: contain the paint, do not clip the card.
+        """
+        tooltip = self.block_after(".toggle-switch::after {", "the toggle tooltip")
+        self.assertIn("bottom: calc(100% + 8px)", tooltip,
+                      "the tooltip is assumed to paint above the switch; if that moves, "
+                      "the clipping question below changes too and so should this test")
         row = self.block_after(".setting-row,\n        .theme-option {", "the settings row box")
-        self.assertIn("overflow: hidden", row,
-                      "the sheen band is a child of the row, so a row that does not clip "
-                      "lets the light sweep across its neighbours")
+        self.assertNotIn("overflow: hidden", row,
+                         "clipping the row to contain the sheen also clips the toggle "
+                         "tooltip — contain the paint instead")
         rest = self.block_after(".setting-row::after,\n        .theme-option::after {",
                                 "the sheen at rest")
         hover = self.block_after(".setting-row:hover::after,", "the sheen on hover")
         self.assertIn("opacity: 0", rest,
                       "a sheen painted while nothing is hovered is the light effect users "
                       "report as a bug")
-        self.assertNotIn("left:", rest,
-                         "`left` is a layout property: animating it reflows on every frame")
-        self.assertIn("translate3d", rest, "the sweep should move on the compositor")
+        for escape_route in ("left:", "translate3d", "width: 45%"):
+            self.assertNotIn(escape_route, rest,
+                             f"`{escape_route}` makes the band a box that can leave the card")
+        self.assertIn("background-size: 250% 100%", rest,
+                      "painting inside the box needs an oversized background to slide")
+        self.assertIn("border-radius: inherit", rest,
+                      "nothing clips the paint now, so it has to follow the card's rounding")
         self.assertIn("opacity: 1", hover)
+        self.assertIn("background-position", hover)
         self.assertIn("body.reduce-motion .setting-row::after", self.css,
                       "Calm Motion has to switch the sweep off, not merely shorten it")
+        self.assertNotIn("body.no-anim .setting-row::after", self.css,
+                         "no-anim is the Hero Animations switch; settings feedback must not "
+                         "answer to it")
 
     def test_nothing_animates_forever_behind_the_pages(self):
         self.assertNotIn("glowMove", self.html,
