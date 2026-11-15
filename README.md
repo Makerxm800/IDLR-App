@@ -10,7 +10,7 @@ Everything runs locally on your machine.
 ![yt‑dlp](https://img.shields.io/badge/yt--dlp-latest-orange)
 ![spotdl](https://img.shields.io/badge/spotdl-latest-brightgreen)
 
-> **Current version: v2.0.7** — a native Tauri desktop app with a bundled media worker, plus a local browser option. Both use the same features and local data, with layouts designed for their respective screens.
+> **Current version: v2.0.8** — a native Tauri desktop app with a bundled media worker, plus a local browser option. Both use the same features and local data, with layouts designed for their respective screens.
 
 [Download the latest Windows setup](https://github.com/Makerxm800/IDLR-App/releases/latest/download/IDLR-App-Setup.exe) · [All releases](https://github.com/Makerxm800/IDLR-App/releases)
 
@@ -273,6 +273,14 @@ idlr/
 ---
 
 ## 📜 Changelog
+
+### v2.0.8 — three things that only looked like polish
+
+- **The Spotify warning was a lie, and it is fixed.** `_finish_startup_checks()` and the import-time probe asked *this* process whether it could import `spotdl`. In the packaged app that is always false — `build.py` freezes spotdl into the separate `IDLR-spotdl` helper on purpose, because importing it costs ~1.3 s and drags fastapi/mutagen/aiohttp into every launch — so every installed copy showed the orange "Spotify's own downloader is unavailable" strip and the `YouTube match` engine badge while Spotify downloads worked perfectly. `/api/info`'s `spotify_engine` is now derived from asking the helper (`IDLR-spotdl --help`, the same handshake `_spotify_run` performs), and the presence check that runs at import time stays a file check: no subprocess, no import, nothing for antivirus to wake up and scan.
+- **The notification popover fits on screen.** `.notif-popover` inherited `overflow: hidden` from the shared popover rule but never inherited the height cap `.user-popover` has, so the panel grew to fit the list, pushed its footer past the bottom of the window, and clipped the row you were reading. The panel caps itself now (`max-height: min(76dvh, 560px)`), the list is the scroller (`flex: 1; min-height: 0; overflow-y: auto`), and the duplicate `.notif-list` geometry rule in the token-restyle block is gone — two blocks setting different `max-height`s for one element is how one theme clipped rows and another did not.
+- **The hover sheen only happens on hover.** `.setting-row { overflow: visible }` with a `clip-path` fudge let the `::after` band (parked at `left: -70%`, always painted) sweep across neighbouring cards, and animating `left` reflows every frame. The row clips (`overflow: hidden`), the band rests at `opacity: 0`, and the sweep is a `translate3d` on hover/focus. `.glow`'s `animation: glowMove 12s infinite` — a 600px radial drifting forever behind every frosted panel — is static, the selected theme no longer glows like a stuck hover, and `Calm Motion` plus `prefers-reduced-motion` switch the whole thing off.
+- **Copy that matches the controls.** The settings blurb said "tap ⓘ" when the control is an SVG info button, and the `Download Alerts` row promised "notify when done / failed" from a switch that feeds the in-app list and may not be permitted to notify at all.
+- **Guards:** `tests/test_frontend.py` gained `PaintAndGeometryTests`, which reads the *rule bodies* (not the sheet as text — CSS comments here quote the declarations they justify, which made an `assertIn("overflow: hidden", …)` check pass on a comment while the real rule said `visible`) and asserts the popover is capped, the list is the scroller, geometry is declared once, and the sheen is gated and clipped. `tests/test_app.py` gained `PackagedSpotifyProbeTests`, including "a working helper outranks an unimportable package" and "the startup probe spawns nothing".
 
 ### v2.0.7 — the interface stops guessing
 

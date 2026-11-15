@@ -129,6 +129,11 @@
             border-color: rgba(20, 30, 60, 0.08);
         }
         body[data-theme="light"] .glow { opacity: .4; }
+        body.reduce-motion .glow,
+        body.no-anim .glow { opacity: .3; }
+        @media (prefers-reduced-motion: reduce) {
+            .glow { opacity: .25; }
+        }
         /* ── liquid glass (Nebula-style site-wide toggle) ──
            NOTE: .card is deliberately NOT blurred — blur creates a stacking
            context that traps the open dropdown (.dd-panel) underneath the
@@ -208,16 +213,12 @@
             z-index: 0;
             top: -200px;
             right: -200px;
-            animation: glowMove 12s ease-in-out infinite
-        }
-        @keyframes glowMove {
-            0%,
-            100% {
-                transform: translate(0, 0)
-            }
-            50% {
-                transform: translate(-100px, 100px)
-            }
+            /* Static. A 600px red radial that drifts for 12s on a loop is visible
+               through every frosted panel in the app — it is what made the settings
+               sheet look like it had a light show behind the rows — and it never
+               stops costing a compositor frame. The gradient still gives the page
+               depth; it just stays put. */
+            opacity: .55
         }
         #app {
             position: relative;
@@ -1159,6 +1160,11 @@
            a jump to the download it came from. */
         .notif-popover {
             width: min(392px, 92vw);
+            /* Without a cap of its own the panel grew to fit the list, pushed its
+               footer past the bottom of the window, and the row you were reading got
+               clipped by `overflow: hidden` on the card. The account popover already
+               worked this way; the list is what scrolls, not the panel. */
+            max-height: min(76dvh, 560px);
             display: flex;
             flex-direction: column;
         }
@@ -1334,26 +1340,36 @@
             border-radius: 999px;
             padding: 2px 9px;
         }
-        .notif-popover .pop-body {
-            padding: 4px 0 6px;
-        }
         .notif-popover .pop-body .pop-action {
             padding: 8px 14px;
             margin: 6px 10px 2px;
             border: 1px solid rgba(255, 255, 255, 0.06);
             border-radius: 12px;
         }
+        .notif-popover .pop-body {
+            display: flex;
+            flex-direction: column;
+            flex: 1;
+            min-height: 0;
+            padding: 0;
+        }
+        .notif-popover .pop-header,
+        .notif-popover .notif-filters,
+        .notif-popover .notif-foot {
+            flex: none;
+        }
         .notif-popover .pop-body .notif-list {
+            /* flex + min-height:0 is what makes this the scroller; max-height is
+               only a floor for a popover with a handful of rows. */
+            flex: 1;
+            min-height: 0;
             max-height: min(340px, 46dvh);
             overflow-y: auto;
             overscroll-behavior: contain;
             scrollbar-width: thin;
-            padding: 4px 0 0;
+            padding: 8px 4px;
         }
-        .notif-popover .pop-body {
-            display: flex;
-            flex-direction: column;
-            min-height: 0;
+        .notif-popover .pop-body .notif-list:empty {
             padding: 0;
         }
         .notif-popover .pop-header {
@@ -2928,50 +2944,59 @@
         }
 
         /* ── hover sheen (mouse VFX on settings rows + theme cards) ── */
-        .setting-row {
-            position: relative;
-            overflow: visible;
-            isolation: isolate;
-        }
+        .setting-row,
         .theme-option {
+            /* `overflow: hidden` here is the whole fix: the band is a child of the
+               card, so it can no longer land on the row next to it. It used to be
+               `visible` with a clip-path fudge, which clipped the band to its own
+               skewed box rather than to the card. */
             position: relative;
             overflow: hidden;
+            isolation: isolate;
+            /* no border-radius here on purpose: each component keeps its own (16px
+               rows, 14px theme cards) and `overflow: hidden` clips to whichever it is */
         }
         .setting-row::after,
         .theme-option::after {
             content: "";
             position: absolute;
-            top: 0;
-            left: -70%;
-            width: 45%;
-            height: 100%;
-            background: linear-gradient(100deg, transparent, var(--redglow), transparent);
-            clip-path: inset(0 round 16px);
-            transform: skewX(-15deg);
-            transition: left .55s ease;
+            inset: 0;
+            background: linear-gradient(100deg, transparent 32%, var(--redglow) 50%, transparent 68%);
+            transform: translate3d(-100%, 0, 0);
+            opacity: 0;
+            transition: transform .5s cubic-bezier(.2, .8, .2, 1), opacity .22s ease;
             pointer-events: none;
             z-index: 0;
         }
-        .setting-row > :not(.setting-row-right),
+        .setting-row > *,
         .setting-row-right {
             position: relative;
             z-index: 1;
         }
-        .setting-row:hover,
-        .setting-row:focus-within {
-            z-index: 5;
-        }
         .setting-row:hover::after,
+        .setting-row:focus-within::after,
         .theme-option:hover::after {
-            left: 140%;
+            opacity: 1;
+            transform: translate3d(100%, 0, 0);
         }
         .setting-row:hover .setting-row-ico,
         .theme-option:hover .theme-swatch {
-            transform: scale(1.1) rotate(-5deg);
+            /* scale + a 5-degree tilt read as a wiggle; a nudge reads as feedback */
+            transform: scale(1.04);
         }
         .setting-row-ico,
         .theme-swatch {
-            transition: transform .25s cubic-bezier(.34, 1.56, .64, 1);
+            transition: transform .18s cubic-bezier(.2, .8, .2, 1);
+        }
+        body.reduce-motion .setting-row::after,
+        body.reduce-motion .theme-option::after,
+        body.no-anim .setting-row::after,
+        body.no-anim .theme-option::after {
+            display: none;
+        }
+        @media (prefers-reduced-motion: reduce) {
+            .setting-row::after,
+            .theme-option::after { transition: none; opacity: 0; }
         }
 
         /* ── theme picker (Nebula-style swatches) ── */
@@ -3004,7 +3029,7 @@
         .theme-option.active-theme {
             border-color: var(--red);
             background: var(--redsoft);
-            box-shadow: 0 0 18px var(--redglow);
+            box-shadow: inset 0 0 0 1px var(--redglow);
         }
         .theme-swatch {
             width: 30px;
@@ -4315,10 +4340,9 @@
             border-color: var(--bdr2);
         }
         .notif-mark-read:disabled { opacity: .45; }
-        .notif-popover .pop-body .notif-list {
-            max-height: min(380px, 56dvh);
-            padding: 8px 4px;
-        }
+        /* The list's geometry lives with the component above — a second opinion
+           here (it used to re-cap max-height at 56dvh) is how one theme ended up
+           clipping rows the other did not. */
         .notif-item {
             align-items: center;
             gap: 11px;
@@ -5449,7 +5473,7 @@
                     <span class="settings-ver-pill js-appver" id="settings-ver"></span>
                 </h3>
                 <div class="settings-head-row">
-                    <p class="settings-head-sub">Every switch takes effect the moment you flip it and is saved on this device only. Tap ⓘ beside any setting for what it actually changes.</p>
+                    <p class="settings-head-sub">Every switch takes effect the moment you flip it and is saved on this device only. Tap the info button beside any setting for what it actually changes.</p>
                     <button type="button" class="pill outline settings-reset" onclick="resetSettingsDefaults()"><svg class="ico ico-sm" aria-hidden="true"><use href="#i-rotate"/></svg> Reset defaults</button>
                 </div>
 
@@ -6235,12 +6259,20 @@
            release" used to be a rule someone had to remember twice per release. */
         const CHANGELOG = [
             {
+                ver: '2.0.8', date: '2026-11-15', items: [
+                    ['gauge', 'The Spotify warning was wrong, so it is gone', 'IDLR asked the app process whether it could import spotdl — but spotdl ships in its own helper process, so every installed copy reported "Spotify is unavailable" while Spotify downloads worked fine. It now asks the helper, and the strip and the "YouTube match" badge only appear when the helper genuinely cannot run.'],
+                    ['bell', 'Notifications fit on the screen', 'The panel never capped its own height, so it grew past the bottom of the window and clipped the row you were reading. The list now scrolls inside a panel that stays put, and long messages wrap instead of running off the edge.'],
+                    ['sparkles', 'The light show calmed down', 'The sweep behind settings rows was painted all the time instead of on hover, and spilled over neighbouring cards. It now appears only while you point at a row, moves on the GPU, and switches off with Calm Motion. The glow drifting behind the panels is static now.'],
+                    ['slider', 'Labels that match the controls', 'The settings blurb pointed at a glyph that is not in the app (the control is an icon button), and Download Alerts promised a system notification the app may not be allowed to send.'],
+                ],
+            },
+            {
                 ver: '2.0.7', date: '2026-11-15', items: [
                     ['folder-open', 'History knows where your files went', 'Every finished download now records its folder, filename and size. Rows show the size, and a folder button opens the file in Explorer or Finder.'],
                     ['sparkles', 'No more emoji — real icons', 'About 80 emoji across the app are now drawn icons that follow your theme, line up with text and look the same on every OS.'],
                     ['globe', 'Sites is a button now', 'The six decorative chips in the hero became one control that opens the real list of what IDLR detects, grouped by kind.'],
                     ['bell', 'Notifications grew up', 'Day groups, a failed/unread filter, an age on each row, a click that jumps to the download, and real system alerts when your browser allows them.'],
-                    ['slider', 'Settings explain themselves', 'Every switch has an ⓘ that says what it changes, the download folder and app data are listed with a reveal button, plus Reset to defaults and a compact row density for History.'],
+                    ['slider', 'Settings explain themselves', 'Every switch has an info button that says what it changes, the download folder and app data are listed with a reveal button, plus Reset to defaults and a compact row density for History.'],
                     ['zap', 'Honest warnings', 'A missing optional engine is now a calm, dismissible notice instead of an orange alarm, and it carries the real error text so it can actually be fixed.'],
                 ],
             },
@@ -8755,7 +8787,7 @@
             autoThumb: ['Download Thumbnail', 'Save cover art'],
             autoPreview: ['Link Preview', 'Fetch title & cover on paste'],
             playlistAll: ['Full Playlist', 'Download entire playlist'],
-            dlNotif: ['Download Alerts', 'Notify when done / failed'],
+            dlNotif: ['Download Alerts', 'Alerts when a job ends'],
             confirmClear: ['Confirm Before Delete', 'Ask before clearing history'],
             liquidGlass: ['Liquid Glass', 'Frosted blur everywhere'],
             animHero: ['Hero Animations', 'Animate on load'],
@@ -8770,7 +8802,7 @@
             autoThumb: ['ON — cover art embedded', 'OFF — faster, fewer FFmpeg errors'],
             autoPreview: ['ON — fetch title & cover on paste', 'OFF — no auto preview'],
             playlistAll: ['ON — entire playlist downloads', 'OFF — single video only'],
-            dlNotif: ['ON — notify when done / failed', 'OFF — silent downloads'],
+            dlNotif: ['ON — the bell lists finished and failed jobs', 'OFF — silent downloads'],
             confirmClear: ['ON — ask before clearing history', 'OFF — delete immediately'],
             liquidGlass: ['ON — frosted blur everywhere', 'OFF — solid, faster paint'],
             animHero: ['ON — animated title on load', 'OFF — static title'],
