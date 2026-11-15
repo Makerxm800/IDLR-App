@@ -77,7 +77,12 @@ class IDLRApiTests(unittest.TestCase):
             stream.write("file")
         invalid = self.client.post("/api/validate-save-path", json={"path": blocked_path})
         self.assertEqual(invalid.status_code, 400)
-        self.assertIn("Cannot create save folder", invalid.json["error"])
+        # This assertion used to pin "Cannot create save folder", which is what the
+        # endpoint said when the name existed but was a *file* — `makedirs
+        # (exist_ok=True)` raises FileExistsError there, so the message blamed the
+        # PC for a typo. The case now has its own sentence; the folder-creation
+        # failure keeps the one below it in FolderErrorWordingTests.
+        self.assertIn("is a file, not a folder", invalid.json["error"])
 
     def test_history_survives_a_truncated_file_and_keeps_a_copy(self):
         """A half-written history.json used to mean 'no history' with no trace."""
@@ -377,10 +382,14 @@ class DownloadProvenanceTests(unittest.TestCase):
         self.downloads = os.path.join(self.temp.name, "Downloads")
         os.makedirs(self.downloads)
         self.history_file = os.path.join(self.temp.name, "history.json")
+        self.accounts_file = os.path.join(self.temp.name, "accounts.json")
         self.client = idlr.app.test_client()
         patcher = mock.patch.object(idlr, "HIST_FILE", self.history_file)
         patcher.start()
         self.addCleanup(patcher.stop)
+        accounts = mock.patch.object(idlr, "ACCS_FILE", self.accounts_file)
+        accounts.start()
+        self.addCleanup(accounts.stop)
         self.revealed = []
         fake = mock.patch.object(
             idlr, "_reveal_in_file_manager",
@@ -445,6 +454,99 @@ class DownloadProvenanceTests(unittest.TestCase):
         response = self.client.post("/api/reveal", json={"user": "u@e.com", "url": "", "folder": other})
         self.assertEqual(response.status_code, 200)
         self.assertEqual(self.revealed, [(other, False)])
+
+    def save_folder_of(self, email, path):
+        """Write the account the way /api/prefs leaves it: `savepath`, verbatim."""
+        with open(self.accounts_file, "w", encoding="utf-8") as stream:
+            json.dump({email: {"email": email, "name": "T",
+                               "prefs": {"mode": "Video", "savepath": path}}}, stream)
+
+    def test_a_folder_chosen_in_settings_can_be_opened(self):
+        # The bug this guard holds shut: the allow-list compared the path the
+        # screen was showing with the path history had stored as raw strings, so
+        # `%USERPROFILE%\Music`, `~/Music` and `/home/me/Music` were three
+        # different folders. The button in front of the user's own save path then
+        # answered "that download is not in your history" — a command that looked
+        # like it opened a folder and opened nothing.
+        music = os.path.join(self.temp.name, "Music")
+        os.makedirs(music)
+        self.save_folder_of("u@e.com", music)
+        indirect = os.path.join(self.temp.name, "Downloads", "..", "Music")
+        self.assertNotEqual(indirect, music)
+        response = self.client.post("/api/reveal",
+                                    json={"user": "u@e.com", "url": "", "folder": indirect})
+        self.assertEqual(response.status_code, 200, response.json)
+        self.assertEqual(self.revealed, [(music, False)])
+
+    def test_a_refusal_from_the_shell_does_not_dump_the_path(self):
+        # This is the message the toast prints verbatim, in a corner of the screen
+        # about 380px wide. The path belongs in the log line beside it; pasted into
+        # the toast it buries the one sentence that explains what happened.
+        music = os.path.join(self.temp.name, "Music")
+        os.makedirs(music)
+        saved = self.write("Song.mp3", 20)
+        self.save_folder_of("u@e.com", music)
+        idlr._save_hist("u@e.com", "https://a/11", "Song", "", "Audio Only",
+                        "320k", "mp3", "done", folder=music)
+        # Both branches: the named history entry, and the folder-only fallback.
+        # They are separate returns, and only one of them ever gets edited.
+        for body in ({"user": "u@e.com", "url": "https://a/11"},
+                     {"user": "u@e.com", "url": "", "folder": music}):
+            with self.subTest(body=body), mock.patch.object(
+                    idlr, "_reveal_in_file_manager",
+                    side_effect=OSError(2, "No such file or directory")):
+                response = self.client.post("/api/reveal", json=body)
+            self.assertEqual(response.status_code, 500)
+            self.assertIn("file manager", response.json["error"])
+            for leaked in (self.temp.name, saved, music):
+                self.assertNotIn(leaked, response.json["error"],
+                                 "the raw path leaked into a user-facing message")
+
+    def test_a_folder_spelled_with_a_home_prefix_is_the_same_folder(self):
+        # The screen can hold `~/Music` while history and preferences hold the
+        # absolute `/home/me/Music`. `realpath` alone does not close that gap, and
+        # on Windows the same trap catches `%USERPROFILE%\Music`, which
+        # `expanduser` never expands at all — so the comparison has to go through
+        # the same expansion the writers used, on both sides.
+        music = os.path.join(self.temp.name, "Music")
+        os.makedirs(music)
+        idlr._save_hist("u@e.com", "https://a/9", "Song", "", "Audio Only",
+                        "320k", "mp3", "done", folder=music)
+        home_var = "USERPROFILE" if os.name == "nt" else "HOME"
+        with mock.patch.dict(os.environ, {home_var: self.temp.name}):
+            response = self.client.post("/api/reveal",
+                                        json={"user": "u@e.com", "url": "", "folder": "~/Music"})
+        self.assertEqual(response.status_code, 200, response.json)
+        self.assertEqual(self.revealed, [(music, False)])
+
+    def test_the_history_header_opens_the_accounts_own_folder(self):
+        # "Open the download folder" names no download, so what it should open is
+        # the folder this account saves into — not whatever ~/Downloads means.
+        music = os.path.join(self.temp.name, "Music")
+        os.makedirs(music)
+        self.save_folder_of("u@e.com", music)
+        response = self.client.post("/api/reveal", json={"user": "u@e.com", "url": ""})
+        self.assertEqual(response.status_code, 200, response.json)
+        self.assertEqual(self.revealed, [(music, False)])
+        self.assertEqual(response.json["path"], music)
+
+    def test_a_refused_folder_says_what_the_app_will_open(self):
+        secret = os.path.join(self.temp.name, "secret")
+        os.makedirs(secret)
+        response = self.client.post("/api/reveal",
+                                    json={"user": "u@e.com", "url": "", "folder": secret})
+        self.assertEqual(response.status_code, 404)
+        self.assertEqual(self.revealed, [], "the refusal has to happen before the shell")
+        self.assertIn("folders it saves into", response.json["error"],
+                      "a bare denial reads as a broken button; the message has to name "
+                      "the two places the app will open")
+
+    def test_a_missing_save_folder_is_reported_not_opened(self):
+        self.save_folder_of("u@e.com", os.path.join(self.temp.name, "gone"))
+        response = self.client.post("/api/reveal", json={"user": "u@e.com", "url": ""})
+        self.assertEqual(response.status_code, 404)
+        self.assertEqual(self.revealed, [])
+        self.assertIn("does not exist any more", response.json["error"])
 
     def test_reveal_of_a_deleted_file_reports_instead_of_lies(self):
         path = self.write("Gone.mp4", 5)
@@ -690,3 +792,49 @@ class IssueLifetimeTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class FolderErrorWordingTests(unittest.TestCase):
+    """What the app says when a folder cannot be used.
+
+    These strings are the whole explanation at the moment someone is trying to
+    pick a save folder, so they have to read as a sentence from the app — the
+    errno belongs after the reason, not in place of it. `validate-save-path` is
+    what the folder dialog shows them in, so the promise is checked through the
+    endpoint rather than against the helper.
+    """
+
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp.cleanup)
+        self.client = idlr.app.test_client()
+
+    def post(self, path):
+        return self.client.post("/api/validate-save-path", json={"path": path})
+
+    def test_a_file_is_refused_as_a_file(self):
+        a_file = os.path.join(self.temp.name, "not-a-folder.txt")
+        with open(a_file, "w", encoding="utf-8") as stream:
+            stream.write("x")
+        response = self.post(a_file)
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("is a file, not a folder", response.json["error"])
+
+    def test_a_missing_parent_folder_is_created_rather_than_mourned(self):
+        wanted = os.path.join(self.temp.name, "Music", "IDLR")
+        response = self.post(wanted)
+        self.assertEqual(response.status_code, 200, response.json)
+        self.assertTrue(os.path.isdir(wanted), "the probe-write is the promise")
+
+    def test_the_technical_reason_survives_the_plain_one(self):
+        # The friendly clause leads, but the exception text is what a bug report
+        # needs, so neither half may be dropped.
+        with mock.patch.object(idlr.os, "makedirs",
+                               side_effect=PermissionError(13, "Permission denied")):
+            response = self.post(os.path.join(self.temp.name, "nope"))
+        self.assertEqual(response.status_code, 400)
+        error = response.json["error"]
+        self.assertIn("will not let IDLR write there", error)
+        self.assertIn("PermissionError", error)
+        self.assertLess(error.index("will not let"), error.index("PermissionError"),
+                        "the reason has to come before the traceback-shaped tail")

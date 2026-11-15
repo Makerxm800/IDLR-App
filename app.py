@@ -9,7 +9,7 @@ import io
 import importlib.util
 from pathlib import Path
 
-APP_VERSION = "2.0.9"
+APP_VERSION = "2.0.10"
 APP_DIR = os.path.join(os.path.expanduser("~"), ".idlr_app")
 os.makedirs(APP_DIR, exist_ok=True)
 _YTDLP_UPDATE_STATE = os.path.join(APP_DIR, "ytdlp-update.json")
@@ -636,13 +636,48 @@ def expand_save_path(p):
         return default_download_dir()
     return os.path.normpath(os.path.expandvars(os.path.expanduser(p)))
 
+def _folder_error_reason(exc):
+    """One clause that says why a folder could not be used, in the app's words.
+
+    `[Errno 13] Permission denied: 'D:\\Music'` is the accurate sentence and the
+    one nobody reads, and it is what a toast looked like when the save folder was
+    refused — an error inside an error, at the moment the user is trying to
+    understand a button. The plain clause comes first; the exception stays in
+    parentheses because it is what a bug report needs.
+    """
+    name = type(exc).__name__
+    if isinstance(exc, PermissionError):
+        why = "this PC will not let IDLR write there"
+    elif isinstance(exc, FileNotFoundError):
+        why = "that path does not exist any more"
+    elif isinstance(exc, NotADirectoryError):
+        why = "that is a file, not a folder"
+    elif isinstance(exc, FileExistsError):
+        # The path was not a file a moment ago and is now; `makedirs(exist_ok=True)`
+        # says exactly this when the name exists but is not a directory.
+        why = "something else is already there under that name"
+    elif getattr(exc, "errno", None) in (28, 122):   # ENOSPC / EDQUOT
+        why = "that drive is full"
+    else:
+        why = "this PC refused it"
+    return f"{why} ({name}: {exc})"
+
+
 def ensure_writable_dir(path):
     """Create the folder and PROVE we can write in it (probe file).
     Returns (ok, real_path, error)."""
+    if os.path.exists(path) and not os.path.isdir(path):
+        # Asked first, because `makedirs(exist_ok=True)` answers this case with
+        # FileExistsError — technically true, and it told the user "this PC
+        # refused it" when the real news was that they had typed a filename.
+        return False, path, (f"'{path}' is a file, not a folder. Choose the folder "
+                             f"you want downloads saved inside.")
     try:
         os.makedirs(path, exist_ok=True)
     except Exception as e:
-        return False, path, f"Cannot create save folder '{path}': {e}"
+        return False, path, (f"Cannot create save folder '{path}': "
+                             f"{_folder_error_reason(e)}. Choose a folder you can write "
+                             f"in — your Documents, or a folder on another drive.")
     probe_path = ""
     try:
         with tempfile.NamedTemporaryFile(prefix=".idlr_write_test_", dir=path, delete=False) as probe:
@@ -655,8 +690,10 @@ def ensure_writable_dir(path):
             try:
                 os.remove(probe_path)
             except OSError as cleanup_error:
-                return False, path, f"Save folder check failed: {e}; could not remove probe file: {cleanup_error}"
-        return False, path, f"Save folder not writable '{path}': {e}. Pick another folder (click the path bar)."
+                return False, path, (f"IDLR could not clean up after testing '{path}': "
+                                     f"{cleanup_error}")
+        return False, path, (f"'{path}' will not accept a new file: "
+                             f"{_folder_error_reason(e)}. Choose a different folder.")
 
 def pick_temp_dir(savepath=""):
     """A temp dir we KNOW is writable. Never blindly trust ambient TEMP —
@@ -1064,13 +1101,28 @@ def _reveal_in_file_manager(path, select):
     return "file" if (select and os.path.isfile(path)) else "folder"
 
 
+def reveal_key(path):
+    """The comparable form of a folder path.
+
+    One directory has three spellings in this app: what a Windows user types
+    (`%USERPROFILE%\\Music`), what a POSIX user types (`~/Music`), and what
+    /api/validate-save-path stored after resolving either. Comparing raw strings
+    made them look like three different folders, so the buttons that open a
+    folder refused to open the folder the user had just chosen. Expanding through
+    the same helper the writers use — `expand_save_path`, which knows about
+    `%VAR%` where `expanduser` does not — collapses them back into one key.
+    """
+    return os.path.normcase(os.path.realpath(expand_save_path(path)))
+
+
 @app.route("/api/reveal", methods=["POST"])
 def reveal_download():
     """Show a finished download in Explorer / Finder.
 
-    Takes no path from the client, on purpose: the caller names a history entry
-    and what gets opened is the path that entry recorded. Accepting a path would
-    turn a localhost UI with no auth into "reveal any file on this machine".
+    A path from the client is only ever opened if it is a folder IDLR has already
+    used for that account — the default, the save folder in their preferences, or
+    a folder a history row names. Accepting any path would turn a localhost UI
+    with no auth into "reveal any file on this machine".
     """
     d = request.json or {}
     email = d.get("user", ""); url = d.get("url", "")
@@ -1080,22 +1132,43 @@ def reveal_download():
         # "Open the download folder" from the History header names no download,
         # so fall back to a folder IDLR has already used. The allow-list matters:
         # without it this endpoint would open any folder the caller types out.
-        want = str(d.get("folder") or "")
-        allowed = {os.path.realpath(default_download_dir())}
-        allowed |= {os.path.realpath(h["folder"]) for h in hist
+        want = str(d.get("folder") or "").strip()
+        accs = jload(ACCS_FILE, {})
+        acc = accs.get(email) if isinstance(accs.get(email), dict) else {}
+        prefs = acc.get("prefs") if isinstance(acc.get("prefs"), dict) else {}
+        # `savepath` is what /api/prefs stores today; `path` is the name older
+        # accounts were written with, so both count.
+        prefs_path = str(prefs.get("savepath") or prefs.get("path") or "").strip()
+        allowed = {default_download_dir(), prefs_path}
+        allowed |= {h["folder"] for h in hist
                     if h.get("user") == email and isinstance(h.get("folder"), str)}
-        if want and os.path.realpath(os.path.expanduser(want)) in allowed:
-            try:
-                kind = _reveal_in_file_manager(os.path.expanduser(want), False)
-            except Exception as e:
-                log("HIST", f"reveal folder failed: {type(e).__name__}: {str(e)[:120]}")
-                return jsonify(error="Your file manager refused to open."), 500
-            return jsonify(ok=True, kind=kind, path=os.path.expanduser(want))
-        return jsonify(error="That download is not in your history."), 404
-    target = entry.get("file") or ""
-    select = bool(target) and os.path.exists(target) and os.path.isfile(target)
+        allowed = {reveal_key(p) for p in allowed if p}
+        if want:
+            if reveal_key(want) not in allowed:
+                # Naming a folder this account never saved into stays a refusal —
+                # that is the line that keeps this endpoint out of the rest of the
+                # disk. What changed is the comparison above: a folder chosen in
+                # Settings now matches itself, which it did not when the test was
+                # a raw string equality between `~/Music` and `/home/me/Music`.
+                return jsonify(error="IDLR only opens folders it saves into. Yours "
+                                     "are the Downloads folder and the one shown in "
+                                     "Settings > Download folder."), 404
+            target = expand_save_path(want)
+        else:
+            target = expand_save_path(prefs_path or default_download_dir())
+        if not os.path.isdir(target):
+            return jsonify(error="That save folder does not exist any more — choose it "
+                                 "again in Settings and IDLR will create it."), 404
+        try:
+            kind = _reveal_in_file_manager(target, False)
+        except Exception as e:
+            log("HIST", f"reveal folder failed: {type(e).__name__}: {str(e)[:120]}")
+            return jsonify(error="Your file manager refused to open."), 500
+        return jsonify(ok=True, kind=kind, path=target)
+    target = expand_save_path(entry["file"]) if entry.get("file") else ""
+    select = bool(target) and os.path.isfile(target)
     if not select:
-        target = entry.get("folder") or ""
+        target = expand_save_path(entry.get("folder") or "")
     if not target or not os.path.exists(target):
         return jsonify(error="IDLR can't find that file any more — it may have been "
                              "moved, renamed, or deleted."), 404
@@ -1103,7 +1176,10 @@ def reveal_download():
         kind = _reveal_in_file_manager(target, select)
     except Exception as e:
         log("HIST", f"reveal failed: {type(e).__name__}: {str(e)[:120]}")
-        return jsonify(error="Your file manager refused to open. Path: " + target), 500
+        # The raw path stays in the log, out of the toast: it is the one string
+        # that turns a "your file manager said no" into an unreadable wall of
+        # text in a 380px corner of the screen.
+        return jsonify(error="Your file manager refused to open that folder."), 500
     log("HIST", f"revealed {kind}: {target}")
     return jsonify(ok=True, kind=kind, path=target)
 
