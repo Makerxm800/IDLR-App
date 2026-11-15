@@ -360,5 +360,129 @@ class IDLRApiTests(unittest.TestCase):
                 self.assertEqual(progress.json["status"], "done")
 
 
+class DownloadProvenanceTests(unittest.TestCase):
+    """History used to be able to say *what* was downloaded but never *where it
+    went*, so the row had no "open it" action and no size — and any endpoint that
+    took a path from the browser would be a way to open anything on the machine.
+    """
+
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp.cleanup)
+        self.downloads = os.path.join(self.temp.name, "Downloads")
+        os.makedirs(self.downloads)
+        self.history_file = os.path.join(self.temp.name, "history.json")
+        self.client = idlr.app.test_client()
+        patcher = mock.patch.object(idlr, "HIST_FILE", self.history_file)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        self.revealed = []
+        fake = mock.patch.object(
+            idlr, "_reveal_in_file_manager",
+            side_effect=lambda path, select: self.revealed.append((path, select)) or (
+                "file" if select and os.path.isfile(path) else "folder"))
+        fake.start()
+        self.addCleanup(fake.stop)
+        self.dir_patch = mock.patch.object(idlr, "default_download_dir", lambda: self.downloads)
+        self.dir_patch.start()
+        self.addCleanup(self.dir_patch.stop)
+
+    def write(self, name, size=1234):
+        path = os.path.join(self.downloads, name)
+        with open(path, "wb") as stream:
+            stream.write(b"x" * size)
+        return path
+
+    def test_a_finished_download_records_its_file_and_size(self):
+        # A real yt-dlp filename: punctuation folded to dashes, so nothing about
+        # the title can be rebuilt by string math — the match has to be forgiving.
+        self.write("One Kiss - Calvin Harris And Dua Lipa (JAYDEN OVERDRIVE Edit).mp4", 3_456_789)
+        idlr._save_hist("u@e.com", "https://youtu.be/x",
+                        "One Kiss - Calvin Harris And Dua Lipa (JAYDEN OVERDRIVE Edit)",
+                        "", "Video", "1080p", "mp4", "done", folder=self.downloads)
+        entry = json.load(open(self.history_file, encoding="utf-8"))[0]
+        self.assertEqual(entry["folder"], self.downloads)
+        self.assertTrue(entry["file"].endswith("(JAYDEN OVERDRIVE Edit).mp4"))
+        self.assertEqual(entry["bytes"], 3_456_789)
+
+    def test_no_file_is_claimed_when_the_folder_does_not_match(self):
+        self.write("something else entirely.mp4")
+        idlr._save_hist("u@e.com", "https://youtu.be/y", "A totally different title",
+                        "", "Video", "1080p", "mp4", "done", folder=self.downloads)
+        entry = json.load(open(self.history_file, encoding="utf-8"))[0]
+        self.assertEqual(entry["folder"], self.downloads)
+        self.assertNotIn("file", entry, "a wrong file is worse than no file: the row "
+                                        "would open something the user never asked for")
+        self.assertNotIn("bytes", entry)
+
+    def test_reveal_uses_the_recorded_path(self):
+        path = self.write("Track.mp3", 10)
+        idlr._save_hist("u@e.com", "https://a/1", "Track", "", "Audio Only",
+                        "320k", "mp3", "done", folder=self.downloads)
+        response = self.client.post("/api/reveal", json={"user": "u@e.com", "url": "https://a/1"})
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json["kind"], "file")
+        self.assertEqual(self.revealed, [(path, True)])
+
+    def test_reveal_is_not_a_way_to_open_any_path(self):
+        secret = os.path.join(self.temp.name, "secret")
+        os.makedirs(secret)
+        response = self.client.post("/api/reveal",
+                                    json={"user": "u@e.com", "url": "https://nope", "folder": secret})
+        self.assertEqual(response.status_code, 404)
+        self.assertEqual(self.revealed, [], "an unknown download must not reach the shell")
+
+    def test_reveal_of_a_folder_idlr_actually_used_is_allowed(self):
+        other = os.path.join(self.temp.name, "Music")
+        os.makedirs(other)
+        idlr._save_hist("u@e.com", "https://a/2", "Song", "", "Audio Only",
+                        "320k", "mp3", "done", folder=other)
+        response = self.client.post("/api/reveal", json={"user": "u@e.com", "url": "", "folder": other})
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(self.revealed, [(other, False)])
+
+    def test_reveal_of_a_deleted_file_reports_instead_of_lies(self):
+        path = self.write("Gone.mp4", 5)
+        idlr._save_hist("u@e.com", "https://a/3", "Gone", "", "Video",
+                        "1080p", "mp4", "done", folder=self.downloads)
+        os.remove(path)
+        os.rmdir(self.downloads)
+        response = self.client.post("/api/reveal", json={"user": "u@e.com", "url": "https://a/3"})
+        self.assertEqual(response.status_code, 404)
+        self.assertIn("can't find that file", response.json["error"])
+
+
+class SetupIssueShapeTests(unittest.TestCase):
+    def setUp(self):
+        self.client = idlr.app.test_client()
+
+    def test_report_issue_carries_the_reason_and_deduplicates(self):
+        before = list(idlr.SETUP_PROBLEMS)
+        self.addCleanup(idlr.SETUP_PROBLEMS.__setitem__, slice(None), before)
+        idlr.SETUP_PROBLEMS[:] = []
+        idlr.report_issue("spotdl", "Spotify's own downloader is unavailable",
+                          "falls back to matching", "notice", "RuntimeError: bad pydantic")
+        idlr.report_issue("spotdl", "Spotify's own downloader is unavailable",
+                          "falls back to matching", "notice", "RuntimeError: bad pydantic")
+        self.assertEqual(len(idlr.SETUP_PROBLEMS), 1,
+                         "one broken package must not fill the banner with repeats")
+        entry = idlr.SETUP_PROBLEMS[0]
+        self.assertEqual(entry["severity"], "notice")
+        self.assertIn("pydantic", entry["reason"],
+                      "the exception text is the only thing that makes this fixable")
+
+    def test_api_info_splits_notices_from_blocking_problems(self):
+        before = list(idlr.SETUP_PROBLEMS)
+        self.addCleanup(idlr.SETUP_PROBLEMS.__setitem__, slice(None), before)
+        idlr.SETUP_PROBLEMS[:] = [
+            {"package": "spotdl", "title": "t", "detail": "d", "severity": "notice", "reason": "r"},
+        ]
+        payload = self.client.get("/api/info").json
+        self.assertEqual(payload["problems"][0]["severity"], "notice")
+        # The UI decides banner vs dismissible notice from these keys alone.
+        for key in ("version", "platform", "python", "data_dir"):
+            self.assertIn(key, payload)
+
+
 if __name__ == "__main__":
     unittest.main()

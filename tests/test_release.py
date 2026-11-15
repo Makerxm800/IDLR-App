@@ -150,6 +150,13 @@ class StartupCostTests(unittest.TestCase):
 
         import app as idlr
 
+        # Let the import-time checks thread finish before anything is counted,
+        # and drop any spotdl entry it already recorded: otherwise this test is a
+        # race between its own sys.path insert and that thread's `import spotdl`.
+        idlr._STARTUP_CHECKS.wait(timeout=60)
+        saved_problems = list(idlr.SETUP_PROBLEMS)
+        idlr.SETUP_PROBLEMS[:] = [i for i in idlr.SETUP_PROBLEMS
+                                  if not (isinstance(i, dict) and i.get("package") == "spotdl")]
         problems_before = len(idlr.SETUP_PROBLEMS)
         # The same thread also prepares FFmpeg; that download is not what this
         # test is about (and would leave a background fetch running).
@@ -182,7 +189,7 @@ class StartupCostTests(unittest.TestCase):
         # leave the module's shared state exactly as found
         idlr.BROKEN_PKGS.clear()
         idlr.BROKEN_PKGS.update(broken_before)
-        del idlr.SETUP_PROBLEMS[problems_before:]
+        idlr.SETUP_PROBLEMS[:] = saved_problems
 
 
 if __name__ == "__main__":
