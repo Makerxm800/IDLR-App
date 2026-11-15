@@ -79,9 +79,30 @@ _activate_updated_ytdlp()
 # YouTube etc. keep working and Spotify downloads show the exact repair command.
 OPTIONAL_PKGS = {"spotdl", "static-ffmpeg"}
 BROKEN_PKGS = set()
-# Human-readable startup problems, surfaced through /api/info so the UI can
-# explain itself instead of dying silently.
+# Human-readable startup issues, surfaced through /api/info so the UI can
+# explain itself instead of dying silently. Each entry is a small dict because
+# "spotdl is missing" and "flask is missing" are not the same news: a *notice*
+# is something IDLR worked around (Spotify links just match on YouTube) and the
+# app still downloads, a *blocking* problem stops downloads. Rendering both as
+# the same orange "IDLR needs one more thing" alarm — which is what used to
+# happen — taught people to ignore the one banner that really means trouble.
 SETUP_PROBLEMS = []
+
+
+def report_issue(package, title, detail, severity, reason=""):
+    """Record one startup issue for /api/info, at most once per package+title.
+
+    `reason` carries the exception text that used to disappear into the log
+    file; it is what makes "spotdl is unavailable" actionable instead of a
+    shrug, and the banner's Copy button hands it over verbatim.
+    """
+    if any(isinstance(item, dict) and item.get("package") == package
+           and item.get("title") == title for item in SETUP_PROBLEMS):
+        return
+    SETUP_PROBLEMS.append({"package": package, "title": title, "detail": detail,
+                           "severity": severity, "reason": str(reason or "")[:300]})
+    log("SETUP", f"  [{'WARN' if severity == 'notice' else '!!'}] {package}: {title}"
+                 + (f" ({str(reason)[:110]})" if reason else ""))
 IS_FROZEN = bool(getattr(sys, "frozen", False))
 
 
@@ -132,16 +153,25 @@ for p, i in [("flask", "flask"), ("yt-dlp", "yt_dlp"),
                 log("SETUP", f"  [!!] automatic repair of {p} failed: {str(e2)[:110]}")
         if p in OPTIONAL_PKGS:
             BROKEN_PKGS.add(p)
-            note = (f"{p} is unavailable — Spotify downloads fall back to YouTube matching."
-                    if p == "spotdl" else
-                    "FFmpeg helper (static-ffmpeg) is unavailable — using the system FFmpeg instead.")
-            log("SETUP", f"  [WARN] {note}")
-            SETUP_PROBLEMS.append(note)
+            if p == "spotdl":
+                report_issue("spotdl", "Spotify's own downloader is unavailable",
+                             "Spotify links still download — IDLR matches the track on "
+                             "YouTube instead, so quality and metadata may differ.",
+                             "notice", f"{type(e).__name__}: {e}")
+            else:
+                report_issue("static-ffmpeg", "FFmpeg helper is unavailable",
+                             "IDLR is using the FFmpeg already on your PATH. MP3 "
+                             "conversion and merging need FFmpeg to work.",
+                             "notice", f"{type(e).__name__}: {e}")
             continue
         # A required package is missing. Raising (rather than sys.exit) keeps the
         # traceback in the log and lets the desktop worker answer with a real
         # error message instead of vanishing mid-handshake.
-        SETUP_PROBLEMS.append(f"{p} is required but broken: {str(e)[:160]}")
+        report_issue(p, f"{p} is required but broken",
+                     "IDLR cannot start until this is repaired — reinstall the app, "
+                     "and check Windows Defender's protection history for a "
+                     "quarantined file.",
+                     "blocking", f"{type(e).__name__}: {e}")
         raise RuntimeError(
             f"IDLR cannot start: the required component '{p}' is missing or broken "
             f"({type(e).__name__}: {str(e)[:160]}). "
@@ -259,19 +289,20 @@ def _setup_ffmpeg():
             else "  [WARN] Bundled FFmpeg is incomplete — MP3/merging may fail")
         return
     if static_ffmpeg is None:
-        SETUP_PROBLEMS.append(
-            "FFmpeg was not found. Install FFmpeg for audio conversion and video merging."
-        )
+        report_issue("ffmpeg", "FFmpeg was not found",
+                     "Install FFmpeg — it is needed for MP3 conversion and for merging "
+                     "video with audio. Audio-only downloads from a single file still work.",
+                     "blocking")
         log("SETUP", "  [WARN] No FFmpeg helper and none on PATH — MP3/merging may fail")
         return
     if IS_FROZEN:
         # An installed app must not create files inside its own (possibly
         # read-only, Program Files) folder — that is also exactly the kind of
         # behaviour antivirus loves to block. The build ships FFmpeg instead.
-        SETUP_PROBLEMS.append(
-            "FFmpeg is not bundled with this IDLR build and none was found on PATH. "
-            "Install FFmpeg for MP3 conversion and video merging."
-        )
+        report_issue("ffmpeg", "This IDLR build has no FFmpeg and none is on your PATH",
+                     "Install FFmpeg, or update IDLR to a build that bundles it — needed "
+                     "for MP3 conversion and for merging video with audio.",
+                     "blocking")
         log("SETUP", "  [WARN] No FFmpeg in the bundle and none on PATH — not downloading into the install folder")
         return
 
@@ -297,10 +328,10 @@ def _setup_ffmpeg():
                 log("SETUP", "  [OK] FFmpeg ready (downloaded in the background)")
         except Exception as e:
             log("SETUP", f"  [WARN] Background FFmpeg setup failed ({type(e).__name__}: {str(e)[:110]})")
-            SETUP_PROBLEMS.append(
-                "IDLR could not prepare FFmpeg (offline, proxy, or antivirus). "
-                "Install FFmpeg yourself for MP3 conversion and video merging."
-            )
+            report_issue("ffmpeg", "IDLR could not prepare FFmpeg",
+                         "Install FFmpeg yourself (offline, proxy, or antivirus blocked "
+                         "the automatic copy). MP3 conversion and merging need it.",
+                         "blocking", f"{type(e).__name__}: {e}")
 
     threading.Thread(target=fetch, name="idlr-ffmpeg-setup", daemon=True).start()
     log("SETUP", "  [..] FFmpeg not found — preparing it in the background")
@@ -361,12 +392,15 @@ def _finish_startup_checks():
                 if pkg in BROKEN_PKGS:
                     continue
                 BROKEN_PKGS.add(pkg)
-                note = ("spotdl is unavailable — Spotify downloads fall back to YouTube matching."
-                        if pkg == "spotdl" else
-                        "FFmpeg helper (static-ffmpeg) is unavailable — using the system FFmpeg instead.")
-                SETUP_PROBLEMS.append(note)
-                log("SETUP", f"  [WARN] {pkg} could not be loaded after all "
-                             f"({type(e).__name__}: {str(e)[:110]}). {note}")
+                if pkg == "spotdl":
+                    report_issue("spotdl", "Spotify's own downloader is unavailable",
+                                 "Spotify links still download — IDLR matches the track "
+                                 "on YouTube instead, so quality and metadata may differ.",
+                                 "notice", f"{type(e).__name__}: {e}")
+                else:
+                    report_issue("static-ffmpeg", "FFmpeg helper is unavailable",
+                                 "IDLR is using the FFmpeg already on your PATH.",
+                                 "notice", f"{type(e).__name__}: {e}")
             if pkg == "static-ffmpeg":
                 # Resolve FFmpeg immediately — before spotdl, the slow import of
                 # the two — because a job that started during startup is waiting
@@ -904,6 +938,55 @@ def delete_history_forever():
                          if not _hist_match(h,email,url)])
     return jsonify(ok=True)
 
+def _reveal_in_file_manager(path, select):
+    """Ask the desktop shell to show `path`, selecting it when `select` is set.
+
+    Every branch is list-argv with no shell: a path can legally contain `&`, `|`
+    or a quote, and an unquoted shell command would either fail on them or run
+    part of the filename.
+    """
+    if os.name == "nt":
+        cmd = ["explorer", "/select," + path] if select else ["explorer", path]
+    elif sys.platform == "darwin":
+        cmd = ["open", "-R", path] if select else ["open", path]
+    else:
+        # No portable "select this file" on XDG; opening the containing folder is
+        # the closest thing that works on every desktop environment.
+        folder = os.path.dirname(path) if select and os.path.isfile(path) else path
+        cmd = ["xdg-open", folder]
+    subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    return "file" if (select and os.path.isfile(path)) else "folder"
+
+
+@app.route("/api/reveal", methods=["POST"])
+def reveal_download():
+    """Show a finished download in Explorer / Finder.
+
+    Takes no path from the client, on purpose: the caller names a history entry
+    and what gets opened is the path that entry recorded. Accepting a path would
+    turn a localhost UI with no auth into "reveal any file on this machine".
+    """
+    d = request.json or {}
+    email = d.get("user", ""); url = d.get("url", "")
+    entry = next((h for h in jload(HIST_FILE, []) if _hist_match(h, email, url)), None)
+    if entry is None:
+        return jsonify(error="That download is not in your history."), 404
+    target = entry.get("file") or ""
+    select = bool(target) and os.path.exists(target) and os.path.isfile(target)
+    if not select:
+        target = entry.get("folder") or ""
+    if not target or not os.path.exists(target):
+        return jsonify(error="IDLR can't find that file any more — it may have been "
+                             "moved, renamed, or deleted."), 404
+    try:
+        kind = _reveal_in_file_manager(target, select)
+    except Exception as e:
+        log("HIST", f"reveal failed: {type(e).__name__}: {str(e)[:120]}")
+        return jsonify(error="Your file manager refused to open. Path: " + target), 500
+    log("HIST", f"revealed {kind}: {target}")
+    return jsonify(ok=True, kind=kind, path=target)
+
+
 @app.route("/api/history/restore", methods=["POST"])
 def restore_history_item():
     d=request.json or {}
@@ -1101,7 +1184,8 @@ def _spotify_run(job, url, savepath, user, fmt, quality="320k", job_id="?", want
             job.update({"status":"done","progress":100,"done":True})
             _log_to(job, {"t":f"✓ Spotify download saved to {savepath}","c":"ok"})
             log("SPOTIFY", f"[{job_id}] DONE -> {savepath}")
-            _save_hist(user, url, title, thumb, "Audio Only", quality, audio_fmt, "done")
+            _save_hist(user, url, title, thumb, "Audio Only", quality, audio_fmt, "done",
+                       folder=savepath)
             return
         tail = "\n".join([l for l in out.split("\n") if l.strip()][-6:])
         log("SPOTIFY", f"[{job_id}] spotdl FAILED (exit {result.returncode}) — trying YouTube-match fallback")
@@ -1276,14 +1360,14 @@ def _ytdlp_run(job, url, mode, quality, fmt, savepath, user,
         job.update({"status":"done","progress":100,"done":True})
         _log_to(job, {"t": f"✓ Saved to {savepath}","c":"ok"})
         log("YT-DLP", f"[{job_id}] DONE -> {savepath}")
-        _save_hist(user, url, title, thumb, mode, quality, fmt, "done")
+        _save_hist(user, url, title, thumb, mode, quality, fmt, "done", folder=savepath)
 
     except Exception as e:
         err_msg = _friendly_dl_error(str(e))
         job.update({"status":"error","error":err_msg,"done":True})
         _log_to(job, {"t": f"✗ {err_msg}","c":"err"})
         log("YT-DLP", f"[{job_id}] FAILED: {err_msg}")
-        _save_hist(user, url, title, thumb, mode, quality, fmt, "error")
+        _save_hist(user, url, title, thumb, mode, quality, fmt, "error", folder=savepath)
 
 def _trim_history(hist):
     """Bound history.json, keeping the rows the user cares about.
@@ -1305,7 +1389,64 @@ def _trim_history(hist):
     return kept
 
 
-def _save_hist(user, url, title, thumb, mode, quality, fmt, status):
+_MEDIA_EXTS = {".mp4", ".mkv", ".webm", ".mov", ".avi", ".flv", ".ts", ".m4v",
+               ".mp3", ".m4a", ".opus", ".ogg", ".wav", ".flac", ".aac"}
+
+
+def _title_key(name):
+    """Fold a filename/title down to letters+digits for a forgiving compare.
+
+    yt-dlp sanitises `%(title)s` its own way (punctuation becomes a dash, emoji
+    get dropped), so rebuilding the filename from the title would be wrong for
+    most real titles. Comparing folded alphanumerics gets the same answer
+    without having to duplicate yt-dlp's rules.
+    """
+    return re.sub(r"[^0-9a-z]+", "", str(name).lower())
+
+
+def _file_size(path):
+    try:
+        return int(os.path.getsize(path))
+    except OSError:
+        return 0
+
+
+def _resolve_output_file(folder, title):
+    """The file a finished download produced, or ("", 0) when unsure.
+
+    Only used to put "Show in folder" on a history row, so guessing wrong costs a
+    missing button and never a wrong deletion. A prefix match on the folded title
+    is enough — the folder belongs to this job and was just written to — and the
+    newest candidate wins so a re-download points at the new file.
+    """
+    best, best_mtime = "", -1.0
+    try:
+        names = os.listdir(folder)
+    except Exception:
+        return "", 0
+    want = _title_key(title)
+    for name in names:
+        stem, ext = os.path.splitext(name)
+        if ext.lower() not in _MEDIA_EXTS:
+            continue
+        key = _title_key(stem)
+        if want and key:
+            probe = want[:12] if len(want) >= 12 else want
+            alt = key[:12] if len(key) >= 12 else key
+            if not (key.startswith(probe) or want.startswith(alt)):
+                continue
+        path = os.path.join(folder, name)
+        try:
+            mtime = os.path.getmtime(path)
+        except OSError:
+            continue
+        if mtime > best_mtime:
+            best, best_mtime = path, mtime
+    return best, (_file_size(best) if best else 0)
+
+
+def _save_hist(user, url, title, thumb, mode, quality, fmt, status,
+               folder=None, path_hint=None):
     # Locked end to end: jload/jsave are atomic on their own, but two downloads
     # finishing together each started from the same snapshot and the later save
     # silently dropped the earlier row (a download vanishing from History).
@@ -1315,6 +1456,19 @@ def _save_hist(user, url, title, thumb, mode, quality, fmt, status):
                "quality":quality,"format":fmt,"status":status,
                "starred":False,"trashed":False,
                "date":datetime.datetime.now().strftime("%Y-%m-%d %H:%M")}
+        if folder:
+            # History could always say *what* was downloaded but never *where it
+            # went*, which is why a row had no "open file" action and its only
+            # detail was its quality. Recorded at write time, not derived on read:
+            # a download folder can hold hundreds of files and scanning it on
+            # every /api/history call is a waste on the app's hot path.
+            entry["folder"] = folder
+            if path_hint and os.path.exists(path_hint):
+                entry["file"], entry["bytes"] = path_hint, _file_size(path_hint)
+            else:
+                path, size = _resolve_output_file(folder, title)
+                if path:
+                    entry["file"], entry["bytes"] = path, size
         for item in hist:
             if (item.get("user")==user and item.get("url")==url
                     and item.get("mode")==mode):
@@ -1416,7 +1570,7 @@ def start_download():
             _log_to(job, {"t":f"✗ {msg}","c":"err"})
             log("DL", f"[{jid}] FAILED: {msg}")
             try: _save_hist(user, url, job.get("title") or url, job.get("thumb",""),
-                            mode, quality, fmt, "error")
+                            mode, quality, fmt, "error", folder=savepath)
             except Exception: pass
         finally:
             # A job that never reports back leaves the UI stuck on
@@ -1600,12 +1754,14 @@ def download_thumbnail():
         with open(dest, "wb") as f:
             f.write(data)
         log("THUMB", f"DONE -> {dest}")
-        _save_hist(user, url, title, thumb_url, "Thumbnail", "-", ext.lstrip("."), "done")
+        _save_hist(user, url, title, thumb_url, "Thumbnail", "-", ext.lstrip("."), "done",
+                   folder=savepath, path_hint=dest)
         return jsonify(ok=True, file=os.path.basename(dest), title=title, thumb=thumb_url)
     except Exception as e:
         msg = _friendly_dl_error(str(e))
         log("THUMB", f"FAILED: {msg}")
-        try: _save_hist(user, url, title, "", "Thumbnail", "-", "img", "error")
+        try: _save_hist(user, url, title, "", "Thumbnail", "-", "img", "error",
+                        folder=savepath)
         except Exception: pass
         return jsonify(error=msg),400
 
