@@ -10,7 +10,7 @@ Everything runs locally on your machine.
 ![yt‑dlp](https://img.shields.io/badge/yt--dlp-latest-orange)
 ![spotdl](https://img.shields.io/badge/spotdl-latest-brightgreen)
 
-> **Current version: v2.0.9** — a native Tauri desktop app with a bundled media worker, plus a local browser option. Both use the same features and local data, with layouts designed for their respective screens.
+> **Current version: v2.0.10** — a native Tauri desktop app with a bundled media worker, plus a local browser option. Both use the same features and local data, with layouts designed for their respective screens.
 
 [Download the latest Windows setup](https://github.com/Makerxm800/IDLR-App/releases/latest/download/IDLR-App-Setup.exe) · [All releases](https://github.com/Makerxm800/IDLR-App/releases)
 
@@ -273,6 +273,16 @@ idlr/
 ---
 
 ## 📜 Changelog
+
+### v2.0.10 — the buttons do the thing they say
+
+- **`Open folder` opens your folder.** `POST /api/reveal` will not accept a path from the browser — a localhost UI with no auth must not become "reveal any file on this machine" — so the two path bars fall back to an allow-list of folders IDLR already uses. That list was built with `os.path.realpath` on one side and the raw string history had stored on the other, and `expanduser` does not expand `%USERPROFILE%`, so a folder chosen in Settings never appeared in it: the button in front of your own save path answered *"That download is not in your history."* `reveal_key()` now normalises both sides through the same `expand_save_path` the writers use, the account's own preference counts, and a refusal says which two folders the app will open. Probed live: the chosen folder reaches the shell, `/etc` is still refused.
+- **Notifications are IDLR's, not the browser's.** `new Notification(...)` is drawn — and *signed* — by whichever engine is showing the page, so a finished download arrived as "Microsoft Edge" and needed a permission grant first. The `Notification` path, its permission row and its "Allow system alerts" button are gone: the bell, the toast and the count are the alert, and an alert that lands while the window is unfocused gives the bell exactly one nudge on return (never a blinking light; `Calm Motion` still collapses it).
+- **The rail panels stopped colliding.** The notification panel and the account menu both anchored to `top: calc(100% + 12px)` of their own wrapper, so one opened over the other; in the desktop window the panel was a 392px card anchored inside a 228px sidebar, which meant it covered Info, Settings and the account row below the bell. Opening either now closes the other, and desktop mode anchors both to the workspace beside the rail — `--rail-w` is now the sidebar width *and* the flyout offset, so the two cannot drift apart.
+- **Switches.** Hover used to `scale(1.06)` the whole control — the target moved under the pointer just as you clicked it — and the knob travelled on `cubic-bezier(.34, 1.8, .64, 1)`, which in a 20px knob inside a 46px slot can only overshoot by leaving the track. `toggleSetting` also stamped `style.transform = 'scale(.92)'` on the track with a timer to undo it, and a keyframe pop replayed whenever the row repainted. All four are gone: the track brightens, `:active` stretches the knob along its axis of travel, the travel rides the app's `--ef`, and `min-width: 78px` on `.setting-row-right` puts every switch in the same column so the ⓘ button cannot shift it.
+- **One save-folder control, not two dialogs.** The download page bar and the Settings row now both call `changePath()` — the native Tauri/pywebview picker where there is one, the typed dialog where there isn't — both offer `Open` and `Change`, and `updatePathDisplay()` is the only writer for all three surfaces that show the path (download page, Settings, Info), which is how a folder chosen in Settings could leave the download page saying `~/Downloads`.
+- **One list of sites.** The hero's `Sites` button opened a panel of the same nine names the Info dialog already listed, floating over the options you were using; it is deleted (button, panel, CSS, and its remembered-open state) and `SITES` stays because the detector, the history thumbnails and the Info chips read it.
+- **Guards:** `StyleSheetShapeTests` walks the whole stylesheet and fails on a brace that closes a block it never opened — the mistake every other check in this file was blind to, and one a rule-body probe cannot see. `DownloadProvenanceTests` covers the normalisation (a folder spelled three ways, a History header with no download named, a save folder that no longer exists, and a refusal that names what it will open), and `PaintAndGeometryTests` covers no-browser-notification, one-panel-at-a-time, the flyout's anchor, the switch's hover and press, the switch column, the shared save-folder writer and the absence of the hero list. Each new assertion was mutation-checked: eight mutants, eight caught.
 
 ### v2.0.9 — fixes to the fixes
 

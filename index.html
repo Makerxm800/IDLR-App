@@ -862,6 +862,19 @@
             position: relative;
             flex-shrink: 0;
         }
+        /* An alert that landed while IDLR was in the background gets exactly one
+           ring when the window comes back — never a light that keeps blinking. The
+           class is dropped by the focus handler as soon as it has played, and
+           Calm Motion collapses the duration, so a returning user sees a single
+           nudge and the badge count, not a strobe. */
+        body.attention-ping #notif-trigger .notif-badge {
+            animation: idlrAttention 1.1s cubic-bezier(.22, 1, .36, 1) 1 both;
+        }
+        @keyframes idlrAttention {
+            0% { box-shadow: 0 0 0 0 var(--redglow); }
+            70% { box-shadow: 0 0 0 9px rgba(255, 32, 32, 0); }
+            100% { box-shadow: 0 0 0 0 rgba(255, 32, 32, 0); }
+        }
 
         /* ── User Chip ── */
         .user-chip {
@@ -1224,23 +1237,15 @@
             gap: 8px;
             padding: 4px 12px 10px;
         }
-        .notif-os-state {
+        /* The footer is a flex row beside "Clear all", so this has to be told not
+           to grow: an unwrapped note used to push the button against the panel's
+           rounded corner, where the popover's own clip cut its edge off. */
+        .notif-foot-note {
+            flex: none;
             font-size: 9.5px;
             color: var(--fg3);
             font-family: 'DM Mono', monospace;
-            min-width: 0;
-            overflow: hidden;
-            text-overflow: ellipsis;
             white-space: nowrap;
-        }
-        .notif-os-state button {
-            font: inherit;
-            color: var(--blue);
-            background: none;
-            border: 0;
-            padding: 0;
-            cursor: pointer;
-            text-decoration: underline;
         }
         .notif-item {
             padding: 10px 12px;
@@ -1600,7 +1605,10 @@
         }
         .dl-hero {
             text-align: center;
-            padding: 20px 0 22px
+            /* The bottom padding used to leave room for a chip row under the
+               title. That row is gone, so the hero hands the space back instead of
+               pushing the paste box down the page. */
+            padding: 18px 0 10px
         }
         .hero-title {
             font-family: 'Unbounded', sans-serif;
@@ -1608,65 +1616,12 @@
             font-weight: 900;
             line-height: 1.2
         }
-        /* The hero used to wear six hardcoded chips that were pure decoration —
-           not buttons, not clickable, half emoji, and only a hand-picked subset of
-           what the app actually supports. They are one control now: it opens the
-           real list, generated from the same table URL detection reads. */
-        .hero-chips {
-            display: flex;
-            flex-wrap: wrap;
-            gap: 8px;
-            justify-content: center;
-            margin-top: 16px;
-            position: relative;
-        }
-        .sites-btn {
-            display: inline-flex;
-            align-items: center;
-            gap: 7px;
-            padding: 6px 12px;
-            border-radius: 999px;
-            font-size: 11.5px;
-            font-weight: 700;
-            color: var(--fg2);
-            background: rgba(255, 255, 255, 0.04);
-            border: 1px solid rgba(255, 255, 255, 0.06);
-            cursor: pointer;
-            opacity: 0;
-            animation: chipFadeIn .45s cubic-bezier(.2, .9, .4, 1.1) .5s both;
-            transition: color .16s ease, border-color .16s ease, background .16s ease
-        }
-        .sites-btn .ico { font-size: 14px; }
-        .sites-btn:hover {
-            color: var(--fg);
-            border-color: rgba(255, 32, 32, .34);
-            background: rgba(255, 32, 32, .06)
-        }
-        .sites-btn:focus-visible { outline: 2px solid var(--red); outline-offset: 2px; }
-        .sites-btn[aria-expanded="true"] {
-            color: var(--fg);
-            border-color: rgba(255, 32, 32, .5);
-            background: rgba(255, 32, 32, .09)
-        }
-        .sites-btn[aria-expanded="true"] .sites-caret { transform: rotate(180deg); }
-        .sites-caret { font-size: 12px; opacity: .55; transition: transform .22s cubic-bezier(.22, 1, .36, 1); }
-        .sites-count {
-            font: 700 9.5px 'DM Mono', monospace;
-            color: var(--red);
-            background: rgba(255, 32, 32, .1);
-            padding: 2px 6px;
-            border-radius: 999px
-        }
-        @keyframes chipFadeIn {
-            from {
-                opacity: 0;
-                transform: translateY(8px) scale(.92)
-            }
-            to {
-                opacity: 1;
-                transform: none
-            }
-        }
+        /* The hero used to wear a row of chips under the title — first six
+           decorative ones, then one button that opened a panel repeating what the
+           Info dialog already says, over the top of the options you were using.
+           Nothing of the sort lives here now: the title is the hero, and the list
+           of what IDLR detects is generated from the same table URL detection
+           reads in exactly one place. */
         .hw {
             display: inline-block;
             opacity: 0;
@@ -2000,14 +1955,23 @@
             background: rgba(255, 255, 255, 0.04);
             border: 1px solid rgba(255, 255, 255, 0.08);
             border-radius: 999px;
-            padding: 8px 16px;
+            padding: 8px 10px 8px 16px;
             cursor: pointer;
-            transition: all 0.2s;
+            /* Named, not `all 0.2s`: the shorthand also animated the text inside
+               the bar and the two buttons' layout when they appeared, which is the
+               flicker this row used to have on every hover. */
+            transition: background-color .22s var(--ef), border-color .22s var(--ef),
+                        box-shadow .26s var(--ef), transform .22s var(--ef);
         }
         .path-bar:hover {
             border-color: var(--red);
             background: rgba(255, 255, 255, 0.08);
-            transform: translateY(-1px)
+            transform: translateY(-1px);
+            box-shadow: 0 6px 20px rgba(0, 0, 0, .26);
+        }
+        .path-bar:focus-visible {
+            outline: 2px solid var(--red);
+            outline-offset: 2px;
         }
         .path-text {
             flex: 1;
@@ -2781,21 +2745,26 @@
             background: rgba(255, 255, 255, 0.03);
             border: 1px solid rgba(255, 255, 255, 0.06);
             cursor: pointer;
-            transition: all 0.25s cubic-bezier(.2, .9, .4, 1.1);
+            /* `all` on a bouncy curve meant every property a hover touched —
+               including the row's own height when its detail opened — arrived with
+               a wobble. Named properties and the app's standard ease only move the
+               things a hover is supposed to move. */
+            transition: background-color .22s var(--ef), border-color .22s var(--ef),
+                        box-shadow .28s var(--ef), transform .22s var(--ef);
             user-select: none;
             backdrop-filter: blur(8px);
             height: 100%;
-            min-height: 68px;
+            min-height: 64px;
             box-shadow: 0 2px 8px rgba(0,0,0,0.1);
         }
         .setting-row:hover {
             background: rgba(255, 255, 255, 0.07);
             border-color: rgba(255, 255, 255, 0.14);
-            transform: translateY(-2px) scale(1.005);
+            transform: translateY(-1px);
             box-shadow: 0 8px 24px rgba(0,0,0,0.3);
         }
         .setting-row:active {
-            transform: scale(0.98);
+            transform: scale(0.99);
         }
         .setting-row:focus-visible {
             outline: 2px solid var(--red);
@@ -2851,6 +2820,13 @@
             align-items: center;
             gap: 8px;
             flex-shrink: 0;
+            /* One switch column for the whole panel. A row that carries the info
+               button is 32px wider on the right than one that does not, so the
+               switches only lined up by accident of wording; a floor on the column
+               puts every switch's right edge on the same line, and leaves every
+               tooltip the same room to grow left. */
+            min-width: 78px;
+            justify-content: flex-end;
         }
         .setting-row-val {
             font-size: 11px;
@@ -2863,7 +2839,16 @@
             white-space: nowrap;
         }
 
-        /* Premium animated toggle (spring knob + glow pop) */
+        /* ── switches: hover, press and travel ──
+           Every switch in the app, from one rule set. Three things were wrong
+           with the old one: the whole control scaled up on hover, so the target
+           moved under the pointer just as you aimed at it; the knob travelled on a
+           curve that overshoots by 80%, which a 20px knob in a 46px slot can only
+           do by leaving the track — that is the "not smooth" people see; and a
+           keyframe pop replayed whenever the row was repainted, first paint
+           included. So: the track only brightens, the knob answers the press by
+           stretching along the axis it travels, and the travel itself rides the
+           same ease every other control in IDLR uses. */
         .toggle-switch {
             width: 46px;
             height: 26px;
@@ -2873,43 +2858,47 @@
             position: relative;
             flex-shrink: 0;
             cursor: pointer;
-            transition: background .3s, border-color .3s, box-shadow .3s, transform .15s;
-            box-shadow: inset 0 1px 3px rgba(0,0,0,0.3);
-            backdrop-filter: blur(4px);
+            transition: background-color .22s var(--ef), border-color .22s var(--ef),
+                        box-shadow .28s var(--ef);
+            box-shadow: inset 0 1px 3px rgba(0, 0, 0, .3);
             z-index: 2;
         }
+        /* Anchored to the switch's right edge so the bubble grows left, into the
+           card. Centred above a control that already sits at the right of the row,
+           half of it hung outside the panel on the narrow layouts. */
         .toggle-switch::after {
             content: attr(data-tooltip);
             position: absolute;
-            left: 50%;
+            left: auto;
+            right: 0;
             bottom: calc(100% + 8px);
             z-index: 20;
+            width: max-content;
+            max-width: min(240px, calc(100vw - 96px));
             padding: 6px 9px;
             border: 1px solid var(--bdr2);
             border-radius: 8px;
             background: var(--card);
             color: var(--fg);
             box-shadow: 0 8px 22px rgba(0, 0, 0, .28);
-            font: 600 10px/1.2 'DM Sans', sans-serif;
-            white-space: nowrap;
+            font: 600 10px/1.35 'DM Sans', sans-serif;
+            text-align: right;
             opacity: 0;
             visibility: hidden;
             pointer-events: none;
-            transform: translate(-50%, 4px);
-            transition: opacity .16s ease, transform .16s ease, visibility .16s ease;
+            transform: translate(4px, 4px);
+            transition: opacity .18s ease, transform .18s var(--ef), visibility .18s ease;
         }
         .toggle-switch:hover::after,
         .toggle-switch:focus-visible::after,
         .setting-row:focus-visible .toggle-switch::after {
             opacity: 1;
             visibility: visible;
-            transform: translate(-50%, 0);
+            transform: translate(0, 0);
         }
         .toggle-switch:hover {
-            transform: scale(1.06);
-        }
-        .toggle-switch:active {
-            transform: scale(.94);
+            background: rgba(255, 255, 255, 0.1);
+            border-color: rgba(255, 255, 255, 0.22);
         }
         .toggle-switch:focus-visible {
             outline: 2px solid var(--red);
@@ -2918,13 +2907,11 @@
         .toggle-switch.on {
             background: var(--redsoft);
             border-color: var(--red);
-            box-shadow: 0 0 20px var(--redglow), inset 0 0 8px var(--redglow);
-            animation: togglePop .35s cubic-bezier(.34, 1.56, .64, 1);
+            box-shadow: inset 0 0 8px var(--redglow), 0 0 16px var(--redglow);
         }
-        @keyframes togglePop {
-            0% { transform: scale(.9); }
-            55% { transform: scale(1.08); }
-            100% { transform: scale(1); }
+        .toggle-switch.on:hover {
+            border-color: var(--red2);
+            box-shadow: inset 0 0 10px var(--redglow), 0 0 22px var(--redglow);
         }
         .toggle-knob {
             position: absolute;
@@ -2933,24 +2920,43 @@
             width: 20px;
             height: 20px;
             border-radius: 50%;
-            background: rgba(255,255,255,0.95);
-            box-shadow: 0 2px 8px rgba(0,0,0,0.4);
-            transition: transform .35s cubic-bezier(.34, 1.8, .64, 1), background .25s, box-shadow .25s;
+            background: rgba(255, 255, 255, .92);
+            box-shadow: 0 2px 8px rgba(0, 0, 0, .4);
+            transition: transform .26s cubic-bezier(.22, .9, .3, 1),
+                        background-color .22s var(--ef), box-shadow .26s var(--ef);
         }
         .toggle-switch.on .toggle-knob {
             transform: translateX(20px);
             background: #fff;
-            box-shadow: 0 2px 16px var(--redglow);
+            box-shadow: 0 2px 14px var(--redglow);
+        }
+        /* The press is where a switch earns its feel. `:active` arrives with the
+           pointer already on the target, so a shape change here is feedback rather
+           than a moving target — and it stretches along the axis of travel, which
+           reads as the knob loading up to move. The row answers too: the whole card
+           is the click target, so a press on the words has to move the switch or
+           half of the panel feels like a dead zone. */
+        :is(.toggle-switch:active, .setting-row:active) .toggle-knob {
+            transform: scaleX(1.16);
+            transition-duration: .12s;
+        }
+        /* The same press, one step along: an ON knob is already translated, and
+           the two states have to compose rather than replace each other — which is
+           why this rule is written out instead of relying on the one above. */
+        :is(.toggle-switch:active, .setting-row:active) .toggle-switch.on .toggle-knob,
+        .toggle-switch.on:active .toggle-knob {
+            transform: translateX(20px) scaleX(1.16);
+            transition-duration: .12s;
         }
 
         /* ── hover sheen (settings rows + theme cards) ──
-           The previous release slid a narrow band across the card with `left`, then
-           and had to clip the card to keep the band off its neighbours. That clip
-           cut the toggle tooltip in half: `.toggle-switch::after` paints above the
-           switch and needs ~34px, and the row only gives it 21px. So the sweep is
-           now a gradient painted *inside* the pseudo-element's own box — it cannot
-           reach a neighbour at all, nothing has to clip, and it is still
-           paint-only. */
+           The release before last slid a narrow band across the card by animating
+           `left`, and had to clip the card to keep that band off its neighbours.
+           The clip then cut the toggle tooltip in half: `.toggle-switch::after`
+           paints above the switch and needs ~34px, and the row only gives it 21px.
+           So the sweep is now a gradient painted *inside* the pseudo-element's own
+           box — it cannot reach a neighbour at all, nothing has to clip, and it is
+           still compositor-only. */
         .setting-row,
         .theme-option {
             position: relative;
@@ -3073,7 +3079,10 @@
             }
             .settings-grid { grid-template-columns: 1fr; }
             .theme-grid { grid-template-columns: repeat(2, 1fr); }
-            .setting-row { min-height: 60px; }
+            /* No min-height override here on purpose: a row that is 68px on a
+               desktop and 60px on a phone is two different alignments of the same
+               switch, and the switch column is exactly what a narrow layout needs
+               to keep predictable. */
             .setting-row-ico { width: 34px; height: 34px; font-size: 16px; }
         }
         @media (min-width: 561px) and (max-width: 760px) {
@@ -3856,9 +3865,7 @@
         }
 
         /* ── settings effects: toggles actually do something ── */
-        body.no-anim .hw,
-        body.no-anim .hero-chip,
-        body.no-anim .sites-btn {
+        body.no-anim .hw {
             animation: none !important;
             opacity: 1 !important;
             transform: none !important;
@@ -3995,7 +4002,7 @@
         /* Native desktop workspace: browser mode intentionally keeps its own top navigation. */
         body.desktop-shell #main-app {
             display: none;
-            grid-template-columns: 228px minmax(0, 1fr);
+            grid-template-columns: var(--rail-w, 228px) minmax(0, 1fr);
             grid-template-rows: minmax(0, 1fr) auto;
             height: 100dvh;
             min-height: 0;
@@ -4016,6 +4023,13 @@
             background: rgba(8, 8, 9, .88);
             border-right: 1px solid var(--bdr);
             border-bottom: 0;
+            /* No blur on the rail. Its fill is already opaque enough to read as a
+               panel, and any filter here turns the sidebar into the containing
+               block for every `position: fixed` descendant — which is how the two
+               flyout panels came to be measured against a 228px column instead of
+               the window they are supposed to sit in. */
+            backdrop-filter: none;
+            -webkit-backdrop-filter: none;
         }
         body.desktop-shell .tbar-logo {
             gap: 12px;
@@ -4101,6 +4115,14 @@
             font-weight: 600;
         }
         body.desktop-shell #notif-trigger::after { content: "Notifications"; }
+        /* In a 228px row the badge belongs at the end of the line, the way a
+           NavigationView puts a count — over the icon it hid behind the bell. */
+        body.desktop-shell .notif-badge {
+            top: 50%;
+            right: 10px;
+            left: auto;
+            transform: translateY(-50%);
+        }
         body.desktop-shell #info-trigger::after { content: "Info & help"; }
         body.desktop-shell #settings-trigger::after { content: "Settings"; }
         body.desktop-shell .settings-trigger:hover {
@@ -4117,17 +4139,35 @@
             background: var(--s3);
             border: 1px solid var(--bdr);
         }
-        body.desktop-shell .user-popover {
-            top: auto;
-            right: auto;
-            bottom: calc(100% + 10px);
-            left: 0;
-            width: min(340px, calc(100vw - 24px));
-            max-height: min(72dvh, 560px);
-            transform: translateY(12px) scale(.96);
+        /* Desktop flyouts. A 390px panel anchored inside a 228px rail can only
+           ever cover the rows under it, and the rows under the bell are Info,
+           Settings and the account button — which is what the notification panel
+           used to sit on top of. Both panels now open beside the rail, out of the
+           same corner, so the one you are reading is never underneath the other,
+           and a long list scrolls inside the panel instead of running off the
+           bottom of the window. The rail's width is one variable so the flyout
+           can never drift out of alignment with it. */
+        body.desktop-shell { --rail-w: 228px; }
+        body.desktop-shell :is(.notif-popover, .user-popover) {
             border-color: var(--bdr2);
             background: var(--card);
-            box-shadow: 0 24px 70px rgba(0,0,0,.38);
+            box-shadow: 0 24px 70px rgba(0, 0, 0, .38);
+        }
+        @media (min-width: 561px) {
+            body.desktop-shell :is(.notif-popover, .user-popover) {
+                position: fixed;
+                top: auto;
+                right: auto;
+                left: calc(var(--rail-w) + 14px);
+                bottom: 18px;
+                width: min(392px, calc(100vw - var(--rail-w) - 36px));
+                max-height: min(78dvh, 560px);
+                transform: translateX(-10px) scale(.98);
+                transform-origin: left bottom;
+            }
+            body.desktop-shell :is(.user-chip.open .user-popover, .notif-popover.open) {
+                transform: none;
+            }
         }
         body.desktop-shell .chip-info { max-width: 132px; }
         body.desktop-shell .pages {
@@ -4139,13 +4179,13 @@
         body.desktop-shell .dl-hero {
             max-width: 1040px;
             margin: 0 auto;
-            padding: 24px 0 28px;
+            padding: 24px 0 14px;
             text-align: left;
         }
         body.desktop-shell .hero-title { font-size: clamp(36px, 4vw, 54px); }
         body.desktop-shell .hero-title .hw,
         body.web-shell .hero-title .hw { margin-right: .16em; }
-        body.desktop-shell .hero-chips { justify-content: flex-start; }
+
         body.desktop-shell #page-dl > .card,
         body.desktop-shell #page-dl > .prog-wrap,
         body.desktop-shell #page-dl > .now-card,
@@ -4202,7 +4242,8 @@
         body.web-shell .hero-title { font-size: clamp(30px, 5vw, 48px); }
         body.web-shell[data-theme="light"] .topbar { background: rgba(255,255,255,.88); }
         @media (max-width: 860px) {
-            body.desktop-shell #main-app { grid-template-columns: 188px minmax(0, 1fr); }
+            body.desktop-shell { --rail-w: 188px; }
+            body.desktop-shell #main-app { grid-template-columns: var(--rail-w, 188px) minmax(0, 1fr); }
             body.desktop-shell .topbar { padding-right: 12px; padding-left: 12px; }
             body.desktop-shell .tbar-logo { gap: 9px; }
             body.desktop-shell .tbar-logo svg { width: 34px; height: 34px; }
@@ -4538,43 +4579,6 @@
         .ico-brand-video { color: #f0a02a; }
         [data-theme="light"] .ico-brand-twitter { color: #15202b; }
 
-        /* ══ SITES PANEL ══ the panel the Sites button opens. It floats over
-           the page instead of pushing the layout down, so opening it never moves
-           the card you are about to type in. */
-        .sites-panel {
-            position: absolute; z-index: 40; top: calc(100% + 10px); left: 0;
-            width: min(560px, 88vw); padding: 14px;
-            text-align: left; border-radius: 16px;
-            background: var(--card); border: 1px solid var(--bdr2);
-            box-shadow: 0 22px 60px rgba(0,0,0,.55);
-            opacity: 0; transform: translateY(-6px) scale(.985); pointer-events: none;
-            transition: .2s cubic-bezier(.22,1,.36,1);
-        }
-        .sites-panel.open { opacity: 1; transform: none; pointer-events: auto; }
-        .sites-group-label {
-            font: 700 9px 'DM Mono', monospace; letter-spacing: .14em;
-            text-transform: uppercase; color: var(--fg3); margin: 12px 2px 6px;
-        }
-        .sites-group-label:first-child { margin-top: 0; }
-        .sites-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(172px, 1fr)); gap: 6px; }
-        .site-item {
-            display: flex; align-items: center; gap: 9px; padding: 8px 10px;
-            border-radius: 11px; border: 1px solid transparent; text-align: left;
-            background: rgba(255,255,255,.03); cursor: pointer; font: inherit;
-            transition: .16s ease; width: 100%;
-        }
-        .site-item:hover { border-color: var(--bdr2); background: rgba(255,255,255,.06); transform: translateY(-1px); }
-        .site-item .ico { font-size: 17px; }
-        .site-item-txt { min-width: 0; }
-        .site-item-name { font-size: 12px; font-weight: 700; color: var(--fg); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-        .site-item-note { font: 400 9.5px 'DM Mono', monospace; color: var(--fg3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-        .sites-foot {
-            display: flex; align-items: center; justify-content: space-between; gap: 10px;
-            margin-top: 12px; padding-top: 11px; border-top: 1px solid var(--bdr2);
-            font-size: 11px; color: var(--fg3);
-        }
-        .sites-foot b { color: var(--fg2); font-family: 'DM Mono', monospace; font-size: 11px; }
-
         /* ══ SETUP STRIP ══ a missing *optional* engine used to raise the same
            red "IDLR needs one more thing" banner as a broken install, so people
            learned to dismiss the one message that really means downloads will
@@ -4738,9 +4742,15 @@
         .whatsnew-modal .whatsnew-item .icon { display: grid; place-items: center; }
 
         .path-bar-ico { display: grid; place-items: center; color: var(--fg3); font-size: 15px; }
-        .path-bar-actions { display: inline-flex; align-items: center; gap: 8px; flex-shrink: 0; }
-        .path-bar-actions button { border-radius: 8px; padding: 3px 7px; }
-        .path-bar-hint { font-size: 10px; color: var(--fg3); }
+        .path-bar-actions { display: inline-flex; align-items: center; gap: 6px; flex-shrink: 0; }
+        /* Same two words, same size, same shape as the buttons in Settings >
+           Download folder: the row on the download page and the row in the modal
+           are one control, so they are not allowed to look like two. */
+        .path-bar-actions button {
+            border-radius: 9px;
+            padding: 5px 10px;
+            font: 600 10.5px 'DM Sans', sans-serif;
+        }
         .dd-option .ico { vertical-align: -0.16em; }
         .dl-btn .ico, .cancel-btn .ico { vertical-align: -0.14em; }
         .now-thumb .ico { font-size: 22px; opacity: .55; }
@@ -5149,7 +5159,7 @@
                             <div class="pop-body">
                                 <div class="notif-list" id="notif-list" role="list"></div>
                                 <div class="notif-foot">
-                                    <span class="notif-os-state" id="notif-os-state"></span>
+                                    <span class="notif-foot-note">Kept on this device, by IDLR</span>
                                     <button class="notif-clear-all" id="notif-clear-all" onclick="clearAllNotifications()" title="Delete every notification from this device" disabled>
                                         <svg class="ico" aria-hidden="true"><use href="#i-trash"/></svg> Clear all
                                     </button>
@@ -5302,21 +5312,6 @@
                             <span class="hw hw1">Download</span><span class="hw hw2"> Anything.</span><br/>
                             <span class="hw hw3">Zero</span><span class="hw hw4"> Limits.</span>
                         </div>
-                        <div class="hero-chips">
-                            <button type="button" class="sites-btn" id="sites-btn"
-                                    onclick="toggleSitesPanel()" aria-expanded="false" aria-controls="sites-panel">
-                                <svg class="ico" aria-hidden="true"><use href="#i-globe"/></svg>
-                                <span>Sites</span>
-                                <span class="sites-count" id="sites-count">14 + yt-dlp</span>
-                                <svg class="ico sites-caret" aria-hidden="true"><use href="#i-chevron-down"/></svg>
-                            </button>
-                            <div class="sites-panel" id="sites-panel" role="dialog" aria-label="Supported sites">
-                                <div id="sites-panel-list"></div>
-                                <div class="sites-foot">
-                                    <span>Anything yt-dlp can parse works here — <b id="sites-foot-n">1000+</b> extractors, no update needed.</span>
-                                </div>
-                            </div>
-                        </div>
                     </div>
 
                     <div class="card">
@@ -5391,8 +5386,8 @@
                             <span class="path-bar-ico"><svg class="ico" aria-hidden="true"><use href="#i-drive"/></svg></span>
                             <span class="path-text" id="path-txt">~/Downloads</span>
                             <span class="path-bar-actions">
-                                <button type="button" class="pill outline" onclick="event.stopPropagation();openSaveFolder()" title="Open this folder"><svg class="ico ico-sm" aria-hidden="true"><use href="#i-folder-open"/></svg></button>
-                                <span class="path-bar-hint">click to change</span>
+                                <button type="button" class="pill outline" onclick="event.stopPropagation();openSaveFolder()" title="Open this folder in Explorer or Finder"><svg class="ico ico-sm" aria-hidden="true"><use href="#i-folder-open"/></svg> Open</button>
+                                <button type="button" class="pill outline" onclick="event.stopPropagation();changePath()">Change</button>
                             </span>
                         </div>
                     </div>
@@ -5572,17 +5567,15 @@
                             <button type="button" class="setting-info" id="info-btn-dlNotif" onclick="event.stopPropagation();toggleSettingDetail('dlNotif')" aria-label="What does this do?" aria-expanded="false" title="What does this do?"><svg class="ico" aria-hidden="true"><use href="#i-info"/></svg></button>
                             <div class="toggle-switch on" id="toggle-dlNotif"><div class="toggle-knob"></div></div>
                         </div>
-                        <div class="setting-row-detail" id="det-dlNotif">Adds a result to the bell list when a download finishes or fails, and sends a system notification too when your browser allows it (see below). Nothing leaves this device.</div>
+                        <div class="setting-row-detail" id="det-dlNotif">Adds a result to the bell list when a download finishes or fails, and pulses the bell if the window is in the background. IDLR shows these itself — nothing is handed to your browser, and nothing leaves this device.</div>
                     </div>
-                    <div class="setting-row setting-row-static" id="row-os-notif">
+                    <div class="setting-row setting-row-static" id="row-notif-home">
                         <div class="setting-row-ico" style="background:rgba(76,139,255,.1);color:var(--blue)"><svg class="ico" aria-hidden="true"><use href="#i-bell"/></svg></div>
                         <div class="setting-row-text">
-                            <div class="setting-row-title">System notifications</div>
-                            <div class="setting-row-sub" id="os-notif-sub">Asking the browser is optional — the bell list always works</div>
+                            <div class="setting-row-title">Where alerts come from</div>
+                            <div class="setting-row-sub">IDLR's own bell and toast — never your browser</div>
                         </div>
-                        <div class="setting-row-right">
-                            <button class="pill outline" type="button" id="os-notif-btn" onclick="requestNotifPermission()">Allow</button>
-                        </div>
+                        <div class="setting-row-right"><span class="setting-mono">In-app only</span></div>
                     </div>
                 </div>
 
@@ -5610,7 +5603,7 @@
                             <button type="button" class="setting-info" id="info-btn-animHero" onclick="event.stopPropagation();toggleSettingDetail('animHero')" aria-label="What does this do?" aria-expanded="false" title="What does this do?"><svg class="ico" aria-hidden="true"><use href="#i-info"/></svg></button>
                             <div class="toggle-switch on" id="toggle-animHero"><div class="toggle-knob"></div></div>
                         </div>
-                        <div class="setting-row-detail" id="det-animHero">The title and the Sites chip animate in when the page opens. Pure decoration — off means the words are simply there.</div>
+                        <div class="setting-row-detail" id="det-animHero">The download title animates in when the page opens. Pure decoration — off means the words are simply there.</div>
                     </div>
                     <div class="setting-row is-on" id="row-reduceMotion" onclick="toggleSetting('reduceMotion')" onkeydown="toggleKey(event,'reduceMotion')" tabindex="0" role="switch" aria-checked="true" aria-labelledby="ttl-reduceMotion">
                         <div class="setting-row-ico" style="background:rgba(168,85,247,.1);color:#a855f7"><svg class="ico" aria-hidden="true"><use href="#i-gauge"/></svg></div>
@@ -5659,8 +5652,8 @@
                             <div class="setting-row-sub" id="sp-savepath">~/Downloads</div>
                         </div>
                         <div class="setting-row-right">
-                            <button class="pill outline" type="button" onclick="openSaveFolder()" title="Open this folder"><svg class="ico ico-sm" aria-hidden="true"><use href="#i-folder-open"/></svg></button>
-                            <button class="pill outline" type="button" onclick="openPathDialog()">Change</button>
+                            <button class="pill outline" type="button" onclick="openSaveFolder()" title="Open this folder in Explorer or Finder"><svg class="ico ico-sm" aria-hidden="true"><use href="#i-folder-open"/></svg> Open</button>
+                            <button class="pill outline" type="button" onclick="changePath()">Change</button>
                         </div>
                     </div>
                     <div class="setting-row setting-row-static" id="row-data-dir">
@@ -5990,93 +5983,52 @@
             renderNotifications();
             updateBadge();
             saveNotifications();
-            notifyOS(entry);
+            flagAttention(entry);
             return entry.id;
         }
 
-        /* A real system notification, when the browser says we may. Never fatal:
-           no Notification API (older webviews), denied permission, or a desktop
-           build that swallows them — in every one of those cases the bell still has
-           the item, which is the whole point of keeping both paths. */
-        function notifyOS(entry) {
+        /* A finished download has to reach you even when IDLR is behind another
+           window — but not by handing the message to the browser. The browser's own
+           alert API is drawn, and *signed*, by whatever engine is showing this page,
+           so on Windows it arrived as "Microsoft Edge" and on Linux as "Google
+           Chrome": a lie about who did the work, behind a permission prompt nobody
+           asked for. So the app owns its alerts — the toast for what is on screen,
+           the badge for what happened while it was not, and one ring on the bell as
+           you come back. */
+        function flagAttention(entry) {
             try {
                 if ((typeof _settingsState !== 'undefined') && _settingsState.dlNotif === false) return;
-                if (typeof Notification === 'undefined' || Notification.permission !== 'granted') return;
-                const n = new Notification('IDLR — ' + (NOTIF_META[entry.type] ? entry.type : 'info'), {
-                    body: entry.message, tag: 'idlr-' + entry.id, icon: 'favicon.svg',
-                });
-                n.onclick = () => { window.focus(); if (entry.url) notifJump(entry.url); n.close(); };
-                setTimeout(() => n.close(), 8000);
-            } catch (e) { /* notifications are a bonus, never a dependency */ }
+                /* Only something that can cost you a download asks for attention on
+                   return. A welcome line or a rating confirmation is already in the
+                   list and will still be there; a bell that pings for everything is
+                   a bell you learn to ignore. */
+                if (!NOTIF_META[entry.type] || entry.type === 'info') return;
+                /* Looking at the window means the toast already landed, so only a
+                   hidden or unfocused IDLR needs the bell to say "something
+                   happened while you were gone". */
+                if (document.visibilityState === 'visible' && document.hasFocus()) return;
+                document.body.classList.add('needs-attention');
+            } catch (e) { /* an alert about an alert is never worth breaking a download for */ }
         }
 
-        /* The row has to tell the truth about the three states a browser can be
-           in, because "Download Alerts: ON" while the OS is blocking everything is
-           exactly the kind of promise that makes people distrust the whole panel. */
-        function renderNotifPermissionRow() {
-            const sub = document.getElementById('os-notif-sub');
-            const btn = document.getElementById('os-notif-btn');
-            if (!sub || !btn) return;
-            if (typeof Notification === 'undefined') {
-                sub.textContent = 'Not available in this build — the bell list still works';
-                btn.textContent = 'Unavailable';
-                btn.disabled = true;
-                return;
-            }
-            btn.disabled = false;
-            if (Notification.permission === 'granted') {
-                sub.textContent = 'Allowed — you will also see OS notifications';
-                btn.textContent = 'Allowed';
-                btn.disabled = true;
-            } else if (Notification.permission === 'denied') {
-                sub.textContent = 'Blocked by your browser — allow it for this page in site settings';
-                btn.textContent = 'Blocked';
-            } else {
-                sub.textContent = 'Not asked yet — the bell list works either way';
-                btn.textContent = 'Allow';
-            }
-        }
+        /* The nudge plays as you come back rather than while you are away: an
+           animation nobody sees is just a timer burning frames. */
+        window.addEventListener('focus', () => {
+            const body = document.body;
+            if (!body.classList.contains('needs-attention')) return;
+            body.classList.remove('needs-attention');
+            body.classList.add('attention-ping');
+            setTimeout(() => body.classList.remove('attention-ping'), 1200);
+        });
 
-        function requestNotifPermission() {
-            if (typeof Notification === 'undefined') {
-                toast('This build cannot show system notifications — the bell still keeps your list.', 'warn');
-                return;
-            }
-            if (Notification.permission === 'granted') {
-                toast('System notifications are already allowed.', 'ok');
-                renderNotifOsState();
-                return;
-            }
-            Notification.requestPermission().then(state => {
-                renderNotifOsState();
-                renderNotifPermissionRow();
-                toast(state === 'granted' ? 'System notifications are on'
-                    : 'Still blocked — allow them in your browser settings.',
-                    state === 'granted' ? 'ok' : 'warn');
-            }).catch(() => renderNotifOsState());
-        }
-
-        function renderNotifOsState() {
-            const el = document.getElementById('notif-os-state');
-            if (!el) return;
-            if (typeof Notification === 'undefined') {
-                el.textContent = 'In-app only';
-                el.title = 'This build has no system-notification API; the bell keeps your list.';
-                return;
-            }
-            if (Notification.permission === 'granted') {
-                el.textContent = 'System alerts on';
-                el.title = 'IDLR may also notify you through your OS.';
-                return;
-            }
-            if (Notification.permission === 'denied') {
-                el.textContent = 'System alerts blocked';
-                el.title = 'Your browser is blocking notifications for this page.';
-                return;
-            }
-            el.innerHTML = `<button type="button" onclick="requestNotifPermission()">Allow system alerts</button>`;
-            el.title = 'Turn on OS notifications for finished and failed downloads.';
-        }
+        /* There is deliberately no browser-notification code here any more — no
+           `Notification` object, no permission row, no "Allow system alerts"
+           button. Those three existed to ask a browser for permission to show a
+           message it would then sign with its own name (Microsoft Edge on Windows,
+           Chrome on Linux), so an IDLR download arrived looking like a browser
+           ad. An in-app alert that works, in IDLR's own name, beats a system alert
+           that is someone else's UI. Do not reintroduce it without a real desktop
+           notification command on the app side. */
 
         /* Clicking a row used to do nothing at all, which is why the panel was a
            read-only log. A job notification knows the URL it came from, so it can
@@ -6123,7 +6075,6 @@
                 pill.textContent = notifications.length ? (notifications.length > 99 ? '99+' : notifications.length) : '0';
                 pill.style.display = notifications.length ? '' : 'none';
             }
-            renderNotifOsState();
             const shown = notifications
                 .filter(n => _notifFilter === 'all' ? true : _notifFilter === 'unread' ? !n.read : n.type === 'error')
                 .sort((a, b) => notifAt(b) - notifAt(a));
@@ -6190,13 +6141,21 @@
             const pop = document.getElementById('notif-popover');
             const isOpen = pop.classList.toggle('open');
             document.getElementById('notif-trigger')?.setAttribute('aria-expanded', String(isOpen));
-            document.getElementById('user-chip').classList.remove('open');
+            /* Two panels anchored to the same corner of the rail cannot both be
+               open — the second covered the first, which is how "the notification
+               popover is in the wrong place" got reported. Opening either one now
+               closes the other, so there is exactly one panel on screen. */
+            if (isOpen) {
+                closePopover();                       // the account menu, if it was up
+                document.body.classList.remove('needs-attention');
+            }
         }
 
         function closeNotifPopover() {
             document.getElementById('notif-popover').classList.remove('open');
             document.getElementById('notif-trigger')?.setAttribute('aria-expanded', 'false');
         }
+
 
         function markAllNotificationsRead() {
             if (!notifications.some(n => !n.read)) return;
@@ -6261,6 +6220,16 @@
            the shipped version has no entry — "a visible What's-New entry for every
            release" used to be a rule someone had to remember twice per release. */
         const CHANGELOG = [
+            {
+                ver: '2.0.10', date: '2026-11-15', items: [
+                    ['folder-open', 'The folder buttons work', 'Open folder on the download page, in Settings, or on a history row answered "that download is not in your history" whenever you had chosen your own folder — the app compared the path you typed with the path it stored and saw two different places. They are one place now, and the button opens it.'],
+                    ['bell', 'Notifications come from IDLR', 'A download finishing no longer goes through your browser to be signed "Microsoft Edge". The bell, the toast and the count are the alert; if IDLR was in the background, the bell gives you one nudge when you come back.'],
+                    ['bell', 'The panels stopped stacking', 'The notification panel opened on top of the account menu, and in the desktop window it spilled down the sidebar over the other buttons. Each now closes the other, and the desktop panels open beside the sidebar with the list scrolling inside them.'],
+                    ['slider', 'Smoother switches', 'Hover used to scale the whole switch just as you aimed at it, and the knob travelled on a curve that overshoots its slot. Press feedback is on the knob now, the travel is one clean ease, and every switch sits in the same column.'],
+                    ['folder', 'One save folder', 'The download page and Settings now open the same folder picker, offer the same two buttons, and are refreshed by one function — so a folder chosen in either place is the folder every screen shows, the download sends files to, and Open takes you to.'],
+                    ['globe', 'One list of sites', 'The Sites button in the hero opened the same nine names the Info dialog already showed, over the options you were using. The list lives in Info only.'],
+                ],
+            },
             {
                 ver: '2.0.9', date: '2026-11-15', items: [
                     ['check-circle', 'Toggle tooltips are whole again', 'The hover effect added last release clipped each settings card to keep its light sweep inside — and the "Full Playlist: Enabled" tooltip that pops above the switch was clipped with it. The sweep now paints inside its own box, so nothing needs clipping.'],
@@ -6885,7 +6854,14 @@
 
         /* ══ POPOVER ══ */
         function toggleUserPopover(e) { e.stopPropagation();
-            document.getElementById('user-chip').classList.toggle('open'); }
+            const chip = document.getElementById('user-chip');
+            const opening = !chip.classList.contains('open');
+            chip.classList.toggle('open');
+            /* See toggleNotifPopover: the account menu and the notification panel
+               are anchored to the same corner of the rail, so one of them is up at
+               a time and neither hides behind the other. */
+            if (opening) closeNotifPopover();
+        }
 
         function closePopover() { document.getElementById('user-chip').classList.remove('open'); }
 
@@ -6976,9 +6952,10 @@
 
         /* ══ URL DETECTION (improved) ══ */
         /* One row per site IDLR knows by name: the icon the detector shows, the
-           chip in the Sites panel and the fallback thumbnail in History all read
-           from here, so they cannot disagree. `group` is what the Sites panel
-           sections on; `note` is the sentence shown when a link is pasted. */
+           chip in the Info dialog and the fallback thumbnail in History all read
+           from here, so they cannot disagree. `note` is the sentence shown when a
+           link is pasted; `group` is left in as the sectioning the old hero panel
+           used, so a list that wants grouping does not have to invent it again. */
         const SITES = [
             { key: 'yt', name: 'YouTube', icon: 'youtube', brand: 'yt', group: 'video', cls: 'yt', test: u => /youtube\.com|youtu\.be/.test(u),
                 autoMode: u => /list=/.test(u) ? 'Playlist — Video' : 'Video', autoFmt: 'mp4',
@@ -7013,80 +6990,11 @@
                 autoFmt: 'mp4', note: () => 'Movie/stream site — trying all extractors' },
         ];
 
-        /* What the Sites panel groups by, in display order. */
-        const SITE_GROUPS = [
-            ['music', 'Music'],
-            ['video', 'Video'],
-            ['social', 'Social'],
-            ['streams', 'Streams & direct files'],
-        ];
-
-        /* The Sites panel is generated from SITES, not hand-written like the six
-           chips it replaced, so a new extractor shows up in the UI the same commit
-           it lands in the detector. */
-        function renderSitesPanel() {
-            const el = document.getElementById('sites-panel-list');
-            if (!el) return;
-            el.innerHTML = SITE_GROUPS.map(([key, label]) => {
-                const rows = SITES.filter(x => x.group === key);
-                if (!rows.length) return '';
-                return `<div class="sites-group-label">${label}</div><div class="sites-list">` +
-                    rows.map(x => `<button type="button" class="site-item" onclick="pickSiteExample('${x.key}')">
-                        ${siteIcon(x, 'ico-lg')}
-                        <span class="site-item-txt">
-                            <span class="site-item-name">${esc(x.name)}</span>
-                            <span class="site-item-note">${esc(x.autoFmt.toUpperCase())} · ${x.key === 'sp' ? 'via spotdl' : 'yt-dlp'}</span>
-                        </span>
-                    </button>`).join('') + '</div>';
-            }).join('');
-        }
-
-        /* Clicking a site in the panel used to do nothing at all, which is why the
-           chips were decoration. Now it focuses the URL box and says what will
-           happen, so the panel is an explanation rather than a badge shelf. */
-        function pickSiteExample(key) {
-            const site = SITES.find(x => x.key === key);
-            const inp = document.getElementById('url-inp');
-            if (!site || !inp) return;
-            inp.focus();
-            inp.setAttribute('placeholder', site.key === 'sp'
-                ? 'https://open.spotify.com/track/…'
-                : `https:// paste your ${site.name} link…`);
-            if (typeof setSitesPanel === 'function') setSitesPanel(false);
-            toast(`${site.name}: ${site.note ? site.note('') : 'paste a link'}`, 'info');
-        }
-
-        function setSitesPanel(open) {
-            const panel = document.getElementById('sites-panel');
-            const btn = document.getElementById('sites-btn');
-            if (!panel || !btn) return;
-            panel.classList.toggle('open', open);
-            btn.setAttribute('aria-expanded', open ? 'true' : 'false');
-            try { localStorage.setItem('idlr_sites_open', open ? '1' : '0'); } catch (e) {}
-        }
-
-        function toggleSitesPanel() {
-            const panel = document.getElementById('sites-panel');
-            setSitesPanel(!panel.classList.contains('open'));
-        }
-
-        /* The panel floats over the page, so a click anywhere else has to close it
-           — otherwise it sits on top of the options once you have moved on. */
-        document.addEventListener('click', (e) => {
-            const panel = document.getElementById('sites-panel');
-            if (!panel || !panel.classList.contains('open')) return;
-            if (e.target.closest('#sites-panel') || e.target.closest('#sites-btn')) return;
-            setSitesPanel(false);
-        });
-        document.addEventListener('keydown', (e) => {
-            if (e.key === 'Escape') {
-                const panel = document.getElementById('sites-panel');
-                if (panel && panel.classList.contains('open')) {
-                    setSitesPanel(false);
-                    document.getElementById('sites-btn')?.focus();
-                }
-            }
-        });
+        /* The hero used to carry a Sites button that opened a panel of the same
+           nine names the Info dialog already lists, so the download page had two
+           places to look for the same answer and a floating panel to close. The
+           list lives only in Info now; SITES stays because the detector, the
+           history thumbnails and the chips in that dialog all read it. */
 
         function isMovi(url) {
             return /crunchyroll|funimation|peacocktv|paramountplus|disneyplus|hbomax|max\.com|primevideo|netflix|hulu|bilibili|iqiyi|wetv|voot|hotstar|zee5|vrv|wakanim|hidive|tubitv|pluto\.tv|plex\.tv|archive\.org|dailymotion|9anime|kissanime|gogoanime|zoro\.to|aniwatch|bflix|fmovies|primewire|m4ufree|123movie|openload|streamtape|vidstream|streamlare|doodstream|upstream|mixdrop|mp4upload|vidoza|sendvid|streamhub|voe\.sx|filemoon|vtbe\.to|moviesapi|moviehd|hdrezka|kinogo/.test(
@@ -7485,9 +7393,23 @@
             toast('Account removed', 'ok');
         }
 
+        /* One writer for the save folder, three readers. The bar on the download
+           page, the row in Settings and the line in Info used to be updated from
+           three different places, which is how a folder chosen in Settings could
+           leave the download page still saying ~/Downloads — and how the folder
+           buttons ended up asking the server to open a path the screen had only
+           half-updated. Every surface that shows the path is refreshed here. */
         function updatePathDisplay() {
             const display = currentSavePath();
-            ['path-txt'].forEach(id => { const el = document.getElementById(id); if (el) el.textContent = display; });
+            ['path-txt', 'sp-savepath', 'info-savepath'].forEach(id => {
+                const el = document.getElementById(id);
+                if (!el) return;
+                el.textContent = display;
+                /* The label is a basename-friendly one-liner; the full path lives in
+                   the tooltip, because a path clipped in the middle is worse than no
+                   path at all. */
+                el.title = display;
+            });
         }
 
         function fillUserUI() {
@@ -7660,17 +7582,11 @@
         }
 
         async function changePath() {
-            if (window.__TAURI__?.core?.invoke) {
-                try {
-                    const selected = await window.__TAURI__.core.invoke('select_folder', {
-                        currentPath: currentSavePath()
-                    });
-                    if (selected) await saveSelectedPath(selected);
-                } catch (error) {
-                    toast(error.message || 'Could not open the folder picker.', 'err');
-                }
-                return;
-            }
+            /* One control, three shells. A desktop build asks its own window for a
+               folder — Tauri through a command, pywebview through its bridge — and a
+               plain browser gets the typed dialog, because a web page cannot browse
+               the disk. Both ends call back into saveSelectedPath, so the picker and
+               the dialog validate and store the same way. */
             if (window.__TAURI__?.core?.invoke) {
                 try {
                     const selected = await window.__TAURI__.core.invoke('select_folder', {
@@ -8413,14 +8329,12 @@
                     im.innerHTML = (d.ffmpeg ? icon('check', 'ico-sm') : icon('x', 'ico-sm')) + (d.ffmpeg ? ' Yes' : ' No'); }
                 const inet = document.getElementById('info-network');
                 if (inet) inet.textContent = d.network || (browserMode ? 'Unavailable' : 'localhost:5000');
-                const isp = document.getElementById('info-savepath');
-                if (isp) isp.textContent = currentSavePath();
                 renderInfoChips();
-                if (d.default_path) {
-                    _serverDefaultPath = d.default_path;
-                    try { updatePathDisplay(); } catch (e) {}
-                    if (isp) isp.textContent = currentSavePath();
-                }
+                if (d.default_path) _serverDefaultPath = d.default_path;
+                // The Info row, the Settings row and the download bar all read the
+                // current path from updatePathDisplay — including the default, which
+                // is what it shows until this account picks something else.
+                updatePathDisplay();
                 const set = (id, text, title) => {
                     const el = document.getElementById(id);
                     if (!el) return;
@@ -8437,7 +8351,6 @@
                     d.frozen ? 'Running from the packaged desktop app.' : 'Served from source in a browser.');
                 set('info-datadir', d.data_dir || '~/.idlr_app', d.data_dir || '');
                 if (!window.__TAURI__) set('info-helper', 'Not used in browser mode');
-                set('sp-savepath', typeof currentSavePath === 'function' ? currentSavePath() : '~/Downloads');
                 set('sp-datadir', d.data_dir || '~/.idlr_app', d.data_dir || '');
                 const ytdlpSub = document.getElementById('sp-ytdlp');
                 if (ytdlpSub) ytdlpSub.textContent = 'yt-dlp v' + (d.ytdlp || '—')
@@ -8877,11 +8790,12 @@
         function toggleSetting(key) {
             if (!(_settingsState.hasOwnProperty(key))) return;
             _settingsState[key] = !_settingsState[key];
-            const el = document.getElementById('toggle-' + key);
-            if (el) {
-                el.style.transform = 'scale(.92)';
-                setTimeout(() => { el.style.transform = ''; }, 150);
-            }
+            /* The press used to be done here with an inline `transform: scale(.92)`
+               on the track plus a timer to undo it. That is two fights the CSS
+               already wins: the inline style moved the control you had just clicked
+               and snapped back on a timer, so a switch felt loose instead of
+               answered. `:active` on the knob is the press now, and the state below
+               is the only thing this function has to paint. */
             renderSettingRow(key);
             try { localStorage.setItem('idlr_settings', JSON.stringify(_settingsState)); } catch (e) {}
             applySettingsEffects();
@@ -8948,7 +8862,6 @@
             renderSettingRows();
             loadTheme();
             applySettingsEffects();
-            renderNotifPermissionRow();
         }
 
         /* ══ UPDATE FROM SETTINGS PANEL ══ */
@@ -9108,13 +9021,9 @@
             });
             loadNotifications();
             ensureAppVersion();
-            renderSitesPanel();
             renderInfoChips();
             renderWhatsNew();
             applyHistDensity();
-            try {
-                if (localStorage.getItem('idlr_sites_open') === '1') setSitesPanel(true);
-            } catch (e) {}
             // The startup probe only *checks* the optional pieces (spotdl, the FFmpeg
             // helper) and finishes verifying them in the background, so the first
             // /api/info of a session can be honest-but-incomplete. Re-read it once

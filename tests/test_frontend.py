@@ -202,6 +202,48 @@ if __name__ == "__main__":
     unittest.main()
 
 
+class StyleSheetShapeTests(unittest.TestCase):
+    """The sheet has to stay parseable, not merely readable.
+
+    One brace too many is invisible in a diff and unmistakable in the app: a stray
+    `}` closes the enclosing block early, and in a stylesheet written by hand over
+    months the rules that follow it can stop applying without any of their own text
+    changing. `block_after`-style probes would keep passing, because they read
+    declarations as text; only the shape of the whole sheet shows the damage.
+    """
+
+    def setUp(self):
+        html = INDEX.read_text(encoding="utf-8")
+        blocks = re.findall(r"<style\b[^>]*>(.*?)</style>", html,
+                            re.DOTALL | re.IGNORECASE)
+        self.styles = blocks
+        # Comments go first: they quote CSS, and a `{` in a sentence is not a block.
+        self.css = [without_css_comments(b) for b in blocks]
+
+    def test_every_style_block_closes_what_it_opens(self):
+        for n, css in enumerate(self.css, 1):
+            depth = 0
+            for line, text in enumerate(css.splitlines(), 1):
+                for char in text:
+                    if char == "{":
+                        depth += 1
+                    elif char == "}":
+                        depth -= 1
+                if depth < 0:
+                    self.fail(f"style block {n} closes a block it never opened at "
+                              f"line {line} — every rule after that line is being "
+                              f"parsed inside the wrong selector")
+            self.assertEqual(depth, 0,
+                             f"style block {n} leaves {depth} block(s) open at the end")
+
+    def test_the_sheet_is_one_block_with_real_rules(self):
+        self.assertEqual(len(self.css), 1,
+                         "index.html keeps its CSS in one <style> block; a second one "
+                         "means two files of rules whose order decides what wins")
+        rules = sum(b.count("{") for b in self.css)
+        self.assertGreater(rules, 700, "the stylesheet lost most of its rules")
+
+
 class PaintAndGeometryTests(unittest.TestCase):
     """Two things every other test here was blind to.
 
@@ -230,6 +272,58 @@ class PaintAndGeometryTests(unittest.TestCase):
         self.assertNotEqual(start, -1, f"{marker!r} is gone — {what} is no longer checked")
         open_brace = self.css.index("{", start)
         return self.css[open_brace + 1:self.css.index("}", open_brace)]
+
+    def blocks_after(self, marker, what):
+        """Every body written for `marker`, in source order.
+
+        `block_after` reads the first one, which is the right answer while a
+        selector is declared once and wrong the moment it is declared twice — and
+        a selector split between a plain rule and a media query is declared twice
+        on purpose, so "is this true of the panel as rendered" has to be checked
+        against the pair.
+        """
+        bodies = []
+        at = 0
+        while True:
+            start = self.css.find(marker, at)
+            if start == -1:
+                break
+            open_brace = self.css.index("{", start)
+            bodies.append(self.css[open_brace + 1:self.css.index("}", open_brace)])
+            at = open_brace
+        self.assertTrue(bodies, f"{marker!r} is gone — {what} is no longer checked")
+        return bodies
+
+    @staticmethod
+    def code_only(text):
+        """`text` with block comments taken out.
+
+        A guard that forbids a call has to read code, not prose: the comment that
+        explains *why* the call is gone names it, and matching that would leave the
+        test asserting nothing anyone could break again.
+        """
+        return re.sub(r"/\*.*?\*/", " ", text, flags=re.DOTALL)
+
+    def js_function(self, name):
+        """The body of `function name(...) { ... }`, brace-matched.
+
+        CSS gets read by selector for the same reason: `index.html` is one file of
+        hand-written markup, scripts and styles, and any extractor that counts
+        braces without caring about strings gets lost in it. This one only skips
+        over braces, which is enough for a body that closes itself.
+        """
+        match = re.search(r"\bfunction " + re.escape(name) + r"\s*\(", self.html)
+        self.assertIsNotNone(match, f"function {name} is gone")
+        open_brace = self.html.index("{", match.end())
+        depth = 0
+        for i in range(open_brace, len(self.html)):
+            if self.html[i] == "{":
+                depth += 1
+            elif self.html[i] == "}":
+                depth -= 1
+                if depth == 0:
+                    return self.html[open_brace + 1:i]
+        self.fail(f"function {name} never closes")
 
     def test_the_notifications_panel_is_capped_and_the_list_scrolls(self):
         panel = self.block_after(".notif-popover {\n            width: min(392px",
@@ -316,6 +410,114 @@ class PaintAndGeometryTests(unittest.TestCase):
                 body = re.search("const " + table + r" = \{(.*?)\};", self.html, re.DOTALL)
                 self.assertIsNotNone(body, table + " disappeared")
                 self.assertIn(key + ":", body.group(1), key + " is missing from " + table)
+
+    def test_idlr_never_asks_the_browser_to_notify_for_it(self):
+        """The user's words were "i dont want it use microsoft browser".
+
+        A `new Notification(...)` raised from a page is drawn and *signed* by
+        whatever engine shows that page: in the desktop app that is Edge's
+        WebView2, so an IDLR download arrived labelled "Microsoft Edge" and
+        needed a permission grant before it worked at all. The in-app bell,
+        the toast and the badge are the notification now, so nothing may reach
+        for the browser's API again — not the send, not the ask, not a row
+        promising a state the app no longer controls.
+        """
+        code = self.code_only(self.html)
+        for pattern in (r"new\s+Notification\s*\(", r"Notification\.requestPermission",
+                        r"Notification\.permission"):
+            self.assertNotRegex(code, pattern,
+                                "notifications are IDLR's own UI; this reaches for the "
+                                "browser's instead")
+        for dead in ("row-os-notif", "notif-os-state", "requestNotifPermission",
+                     "renderNotifPermissionRow", "notifyOS"):
+            self.assertNotIn(dead, self.html, dead + " is left over from the browser path")
+
+    def test_the_two_rail_panels_cannot_both_be_open(self):
+        """The bell and the account chip sit side by side and both anchored their
+        panel to `top: calc(100% + 12px)` of their own wrapper, so opening the
+        notifications put a panel on top of the account menu, or under it."""
+        notif = self.js_function("toggleNotifPopover")
+        chip = self.js_function("toggleUserPopover")
+        self.assertIn("closePopover", notif,
+                      "opening the bell has to fold the account menu away first")
+        self.assertIn("closeNotifPopover", chip,
+                      "opening the account menu has to fold the bell away first")
+
+    def test_desktop_popovers_open_beside_the_rail_not_down_it(self):
+        """228px of sidebar cannot hold a 392px panel.
+
+        Anchored inside the rail, the notification panel grew over the Info,
+        Settings and account rows below the bell — the position the screenshots
+        complained about. Desktop mode now pins both panels to the workspace
+        beside the rail, at the rail's own width variable, so a change to the
+        sidebar can never leave the panel behind.
+        """
+        flyout = "".join(self.blocks_after(
+            "body.desktop-shell :is(.notif-popover, .user-popover) {",
+            "the desktop flyout both panels share"))
+        for declaration in ("position: fixed", "left: calc(var(--rail-w) + 14px)",
+                            "max-height", "bottom: 18px"):
+            self.assertIn(declaration, flyout, "the flyout lost " + declaration)
+        rail = self.block_after("body.desktop-shell #main-app {", "the desktop grid")
+        self.assertIn("var(--rail-w", rail,
+                      "the grid still hard-codes the rail width the flyout aligns to")
+        self.assertIn("body.desktop-shell { --rail-w: 228px; }", self.css,
+                      "nothing defines the rail width the popover offsets itself by")
+
+    def test_switches_do_not_move_the_thing_you_are_clicking(self):
+        """Hover used to scale the whole 46px control, so the switch ran away
+        under the pointer; the knob's curve ended at a `scale(1.08)` pop."""
+        hover = self.block_after(".toggle-switch:hover {", "the switch hover state")
+        self.assertNotIn("transform", hover,
+                         "a hover transform moves the target mid-click; brighten it instead")
+        knob = self.block_after(".toggle-knob {", "the knob travel")
+        self.assertNotIn("1.8", knob,
+                         "an overshoot that strong pushes the knob out of its slot")
+        self.assertNotIn("togglePop", self.html,
+                         "a keyframe on the state class replays whenever the row repaints")
+        active = self.block_after(":is(.toggle-switch:active, .setting-row:active) .toggle-knob {",
+                                  "the press feedback")
+        self.assertIn("scaleX", active, "the press should stretch the knob, not the track")
+        on_press = self.block_after(
+            ":is(.toggle-switch:active, .setting-row:active) .toggle-switch.on .toggle-knob,",
+            "the press feedback on a switch that is already on")
+        self.assertIn("translateX(20px) scaleX(1.16)", on_press,
+                      "the on-state press has to compose with the knob's travel — "
+                      "scaleX alone would snap the knob back to the off end while "
+                      "the row is held down")
+
+    def test_every_switch_lands_in_the_same_column(self):
+        right = self.block_after(".setting-row-right {", "the right-hand control column")
+        for declaration in ("min-width: 78px", "justify-content: flex-end"):
+            self.assertIn(declaration, right,
+                          "without a column of its own the switch sits wherever the "
+                          "caption happens to end, so rows do not line up")
+
+    def test_one_writer_for_the_save_folder(self):
+        """Three surfaces show the path — the download page, Settings and Info."""
+        body = self.js_function("updatePathDisplay")
+        for surface in ("path-txt", "sp-savepath", "info-savepath"):
+            self.assertIn(surface, body, "the save folder is displayed without " + surface)
+        _, sep, settings_row = self.markup.partition('id="row-save-path"')
+        self.assertTrue(sep, "the Download folder row in Settings is gone")
+        self.assertIn('onclick="changePath()"', settings_row[:900],
+                      "Settings must open the same picker as the download page, not a "
+                      "second, smaller dialog a desktop build could have skipped")
+        _, sep, bar = self.markup.partition('<div class="path-bar"')
+        self.assertTrue(sep, "the save-location bar on the download page is gone")
+        for action in ("openSaveFolder()", "changePath()"):
+            self.assertIn(action, bar[:1200], "the download page is missing " + action)
+
+    def test_the_hero_has_no_second_site_list(self):
+        """The Info dialog already lists what IDLR detects; the hero's Sites
+        button was the same nine names behind a panel that covered the options."""
+        for gone in ("sites-btn", "sites-panel", "renderSitesPanel", "toggleSitesPanel",
+                     "idlr_sites_open"):
+            self.assertNotIn(gone, self.html, gone + " belongs to the removed hero panel")
+        self.assertIn('id="info-chips"', self.markup, "the chips in Info have to stay")
+        self.assertIn("function renderInfoChips", self.html)
+        self.assertIn("const SITES = [", self.html,
+                      "the detector, the history thumbnails and the Info chips all read this")
 
     def test_settings_copy_describes_a_control_that_exists(self):
         """The blurb used to say "tap ⓘ" when the control is an SVG info button, and
