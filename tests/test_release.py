@@ -137,10 +137,13 @@ class StartupCostTests(unittest.TestCase):
                       "source install, and the presence of the bundled helper in a packaged "
                       "one. Importing them here cost ~1.3 s on every launch, and asking this "
                       "process whether it can import spotdl was also flatly wrong in the "
-                      "installed app — spotdl lives in IDLR-spotdl. Spawning the helper is "
-                      "deferred to _finish_startup_checks(); that the probe runs no "
-                      "subprocess is pinned behaviourally in "
-                      "tests.test_app.PackagedSpotifyProbeTests.")
+                      "installed app — spotdl lives in IDLR-spotdl.")
+        self.assertNotIn("subprocess.run(", startup,
+                         "spawning anything at import time is a cold-start cost and the kind "
+                         "of file activity antivirus reacts to. The packaged Spotify check in "
+                         "particular must not reach for the helper either: on a onefile build "
+                         "that unpacks ~150 MB into %TEMP% on every launch to paint a badge. "
+                         "tests.test_app.PackagedSpotifyProbeTests pins the behaviour")
         self.assertNotIn('("static-ffmpeg", "static_ffmpeg"), ("spotdl", "spotdl")]:\n    try:\n        __import__(i)',
                          startup, "the startup loop must not import every package serially")
         # Importing static-ffmpeg and looking for FFmpeg both cost time and can

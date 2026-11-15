@@ -136,39 +136,29 @@ def _find_bundled_binary(name):
     return None
 
 
+# The helper that owns spotdl in a packaged build. Presence is the only thing this
+# process may ask it at startup — see _looks_like_engine_failure() for when the app
+# learns more.
 SPOTDL_HELPER = "IDLR-spotdl.exe" if os.name == "nt" else "IDLR-spotdl"
 
 
-def _bundled_spotdl_answers(timeout=25):
-    """Ask the helper that will do the work whether it can, without importing it.
+# What a spotdl run has to print for it to be about *spotdl* rather than about
+# the track that was requested.
+_ENGINE_MARKERS = ("Traceback (most recent call last)", "ImportError",
+                   "ModuleNotFoundError", "No module named", "pydantic",
+                   "Fatal Python error", "EntryPointNotFound", "frozen importlib")
 
-    In the packaged app `spotdl` is *deliberately* not importable in this process:
-    build.py freezes it into its own `IDLR-spotdl` helper, because importing it
-    costs ~1.3 s and drags fastapi, mutagen, aiohttp and ytmusicapi into every
-    launch. Judging Spotify health by this process's own import machinery
-    therefore reported "Spotify's own downloader is unavailable" — orange strip,
-    YouTube-match badge, the lot — for every installed user, while Spotify
-    downloads worked fine the whole time.
 
-    `--help` is the same handshake `_spotify_run` performs before building a real
-    command, so this probe can only be wrong in cases where the download would
-    also be wrong. That is the property that matters: a health banner nobody
-    trusts is worse than no banner.
+def _looks_like_engine_failure(output):
+    """True when spotdl's own output says the engine cannot run.
+
+    `_spotify_run` falls back to a YouTube match for every failure, so without this
+    a private or DRM'd track would raise a banner about IDLR's downloader. The
+    marker list is deliberately about import/traceback noise: that is what a broken
+    or quarantined helper prints, and it is what no per-track error looks like.
     """
-    helper = _find_bundled_binary(SPOTDL_HELPER)
-    if helper is None:
-        return False, (f"the bundled Spotify helper is not beside {sys.executable} "
-                       "(a security product may have quarantined it)")
-    try:
-        result = subprocess.run([helper, "--help"], capture_output=True, text=True,
-                                timeout=timeout,
-                                creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
-    except Exception as exc:
-        return False, f"{type(exc).__name__}: {exc}"
-    if result.returncode != 0:
-        tail = ((result.stderr or "") + "\n" + (result.stdout or "")).strip()[-200:]
-        return False, f"IDLR-spotdl exited {result.returncode}: {tail or 'with no output'}"
-    return True, ""
+    text = output or ""
+    return any(marker in text for marker in _ENGINE_MARKERS)
 
 
 def _dependency_present(pkg, module):
@@ -472,25 +462,23 @@ def _finish_startup_checks():
     global static_ffmpeg
     try:
         for pkg, module in OPTIONAL_IMPORTS.items():
+            if IS_FROZEN and pkg == "spotdl":
+                # Nothing to verify in this process: spotdl lives in the IDLR-spotdl
+                # helper, whose presence the startup probe already checked. Going
+                # deeper here (run the helper, or import the package) is how an
+                # earlier revision of this check cost every launch a onefile
+                # unpack of ~150 MB into %TEMP% — spent painting a badge. A helper
+                # that is present but broken now reports itself from _spotify_run,
+                # where there is real evidence and the user is already waiting.
+                continue
             try:
-                if IS_FROZEN and pkg == "spotdl":
-                    # `import spotdl` here would be the same wrong question the
-                    # startup probe asked; the helper is the only thing that can
-                    # answer it. Runs in this thread, not on the startup path.
-                    ok, reason = _bundled_spotdl_answers()
-                    if not ok:
-                        raise RuntimeError(reason)
-                else:
-                    imported = __import__(module)
-                    if module == "static_ffmpeg":
-                        static_ffmpeg = imported
+                imported = __import__(module)
+                if module == "static_ffmpeg":
+                    static_ffmpeg = imported
             except Exception as e:
                 if pkg in BROKEN_PKGS:
                     continue
                 BROKEN_PKGS.add(pkg)
-                if IS_FROZEN and pkg == "spotdl":
-                    log("SETUP", "  [!!] Spotify helper check failed; Spotify links "
-                                 "will be matched on YouTube")
                 if pkg == "spotdl":
                     report_issue("spotdl", "Spotify's own downloader is unavailable",
                                  "Spotify links still download — IDLR matches the track "
@@ -1274,6 +1262,14 @@ def _spotify_run(job, url, savepath, user, fmt, quality="320k", job_id="?", want
                        folder=savepath)
             return
         tail = "\n".join([l for l in out.split("\n") if l.strip()][-6:])
+        if _looks_like_engine_failure(tail):
+            # Only an engine that cannot run earns a banner. "This video is private"
+            # is not news about IDLR, and a notice about the downloader would be the
+            # kind of wrong warning this file exists to remove.
+            report_issue("spotdl", "Spotify's own downloader is unavailable",
+                         "Spotify links still download — IDLR matched this one on "
+                         "YouTube instead, so quality and metadata may differ.",
+                         "notice", tail[-300:])
         log("SPOTIFY", f"[{job_id}] spotdl FAILED (exit {result.returncode}) — trying YouTube-match fallback")
         _log_to(job, {"t":"spotdl failed — trying YouTube match instead…","c":"dim"})
         return _spotify_yt_fallback(job, url, savepath, user, fmt, quality, job_id, want_thumb,
