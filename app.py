@@ -968,8 +968,23 @@ def reveal_download():
     """
     d = request.json or {}
     email = d.get("user", ""); url = d.get("url", "")
-    entry = next((h for h in jload(HIST_FILE, []) if _hist_match(h, email, url)), None)
+    hist = jload(HIST_FILE, [])
+    entry = next((h for h in hist if _hist_match(h, email, url)), None)
     if entry is None:
+        # "Open the download folder" from the History header names no download,
+        # so fall back to a folder IDLR has already used. The allow-list matters:
+        # without it this endpoint would open any folder the caller types out.
+        want = str(d.get("folder") or "")
+        allowed = {os.path.realpath(default_download_dir())}
+        allowed |= {os.path.realpath(h["folder"]) for h in hist
+                    if h.get("user") == email and isinstance(h.get("folder"), str)}
+        if want and os.path.realpath(os.path.expanduser(want)) in allowed:
+            try:
+                kind = _reveal_in_file_manager(os.path.expanduser(want), False)
+            except Exception as e:
+                log("HIST", f"reveal folder failed: {type(e).__name__}: {str(e)[:120]}")
+                return jsonify(error="Your file manager refused to open."), 500
+            return jsonify(ok=True, kind=kind, path=os.path.expanduser(want))
         return jsonify(error="That download is not in your history."), 404
     target = entry.get("file") or ""
     select = bool(target) and os.path.exists(target) and os.path.isfile(target)
@@ -1771,6 +1786,8 @@ def info():
                    ffmpeg=bool(FFMPEG),
                    ffmpeg_path=FFMPEG,
                    version=APP_VERSION,
+                   platform=sys.platform,
+                   python=".".join(str(x) for x in sys.version_info[:3]),
                    default_path=default_download_dir(),
                    network=SERVER_URL,
                    frozen=bool(getattr(sys, "frozen", False)),
