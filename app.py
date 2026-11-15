@@ -9,7 +9,7 @@ import io
 import importlib.util
 from pathlib import Path
 
-APP_VERSION = "2.0.8"
+APP_VERSION = "2.0.9"
 APP_DIR = os.path.join(os.path.expanduser("~"), ".idlr_app")
 os.makedirs(APP_DIR, exist_ok=True)
 _YTDLP_UPDATE_STATE = os.path.join(APP_DIR, "ytdlp-update.json")
@@ -106,6 +106,25 @@ def report_issue(package, title, detail, severity, reason=""):
 
 
 IS_FROZEN = bool(getattr(sys, "frozen", False))
+
+
+def clear_issue(package, title=None):
+    """Forget recorded problems for a package, because reality changed its mind.
+
+    `report_issue` is built to survive a noisy startup — it dedupes and the list
+    only grows — which is exactly wrong for a notice raised by *one* failed
+    download: after twenty good Spotify links the banner would still claim the
+    downloader is unavailable, and a warning that outlives its evidence is the
+    thing users learn to ignore. Kept as a slice assignment so a UI polling
+    `/api/info` from another thread never sees a half-written list.
+    """
+    kept = [item for item in SETUP_PROBLEMS
+            if not (isinstance(item, dict)
+                    and item.get("package") == package
+                    and (title is None or item.get("title") == title))]
+    if len(kept) != len(SETUP_PROBLEMS):
+        SETUP_PROBLEMS[:] = kept
+        log("SETUP", f"  [OK] {package}: cleared the earlier notice")
 
 
 def _find_bundled_binary(name):
@@ -1260,6 +1279,10 @@ def _spotify_run(job, url, savepath, user, fmt, quality="320k", job_id="?", want
             log("SPOTIFY", f"[{job_id}] DONE -> {savepath}")
             _save_hist(user, url, title, thumb, "Audio Only", quality, audio_fmt, "done",
                        folder=savepath)
+            # A download that worked is the only real proof the engine is fine, and
+            # it has to be allowed to contradict an earlier failure.
+            clear_issue("spotdl")
+            BROKEN_PKGS.discard("spotdl")
             return
         tail = "\n".join([l for l in out.split("\n") if l.strip()][-6:])
         if _looks_like_engine_failure(tail):

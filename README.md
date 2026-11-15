@@ -10,7 +10,7 @@ Everything runs locally on your machine.
 ![yt‑dlp](https://img.shields.io/badge/yt--dlp-latest-orange)
 ![spotdl](https://img.shields.io/badge/spotdl-latest-brightgreen)
 
-> **Current version: v2.0.8** — a native Tauri desktop app with a bundled media worker, plus a local browser option. Both use the same features and local data, with layouts designed for their respective screens.
+> **Current version: v2.0.9** — a native Tauri desktop app with a bundled media worker, plus a local browser option. Both use the same features and local data, with layouts designed for their respective screens.
 
 [Download the latest Windows setup](https://github.com/Makerxm800/IDLR-App/releases/latest/download/IDLR-App-Setup.exe) · [All releases](https://github.com/Makerxm800/IDLR-App/releases)
 
@@ -273,6 +273,13 @@ idlr/
 ---
 
 ## 📜 Changelog
+
+### v2.0.9 — fixes to the fixes
+
+- **The toggle tooltips are whole again.** Containing the hover sweep with `overflow: hidden` on `.setting-row` also clipped `.toggle-switch::after`, which paints *above* the switch and needs ~34px in a row that offers ~21px — so `Full Playlist: Enabled` was cut in half. The sweep is now a `background-position` gradient painted inside the pseudo-element's own box (`background-size: 250% 100%`, `border-radius: inherit`), which cannot reach a neighbour at all: still paint-only animation, no clipping required, tooltip intact.
+- **Notices can be retracted.** `report_issue` dedupes and only ever grows, which is right for a startup problem and wrong for one raised by a single failed download. `clear_issue(package, title=None)` is the inverse, called from the one place with real evidence — after `_spotify_run` has saved a file and recorded it in history — so a healthy Spotify link takes back the banner an unhealthy one raised. `BROKEN_PKGS.discard("spotdl")` rides along as self-healing, and the classification gate stays the primary defence: `ERROR: This video is private` never becomes an engine notice in the first place.
+- **The right switch owns the effect.** `no-anim` is toggled by *Hero Animations*, so the settings sheen had been wired to it; only `reduce-motion` and `prefers-reduced-motion` turn it off now.
+- **Guards:** `PaintAndGeometryTests` asserts both halves — the sweep is painted inside its own box *and* the row does not clip — with the tooltip rule quoted as the reason, so if the tooltip ever moves the test says so instead of silently approving the clip. Each assertion was mutation-checked (five mutants, five caught). `IssueLifetimeTests` pins the clear's placement by reading `_spotify_run`: exactly one `clear_issue("spotdl")`, inside the success branch, after `_save_hist(`.
 
 ### v2.0.8 — three things that only looked like polish
 

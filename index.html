@@ -2943,30 +2943,33 @@
             box-shadow: 0 2px 16px var(--redglow);
         }
 
-        /* ── hover sheen (mouse VFX on settings rows + theme cards) ── */
+        /* ── hover sheen (settings rows + theme cards) ──
+           The previous release slid a narrow band across the card with `left`, then
+           and had to clip the card to keep the band off its neighbours. That clip
+           cut the toggle tooltip in half: `.toggle-switch::after` paints above the
+           switch and needs ~34px, and the row only gives it 21px. So the sweep is
+           now a gradient painted *inside* the pseudo-element's own box — it cannot
+           reach a neighbour at all, nothing has to clip, and it is still
+           paint-only. */
         .setting-row,
         .theme-option {
-            /* `overflow: hidden` here is the whole fix: the band is a child of the
-               card, so it can no longer land on the row next to it. It used to be
-               `visible` with a clip-path fudge, which clipped the band to its own
-               skewed box rather than to the card. */
             position: relative;
-            overflow: hidden;
             isolation: isolate;
-            /* no border-radius here on purpose: each component keeps its own (16px
-               rows, 14px theme cards) and `overflow: hidden` clips to whichever it is */
         }
         .setting-row::after,
         .theme-option::after {
             content: "";
             position: absolute;
             inset: 0;
-            background: linear-gradient(100deg, transparent 32%, var(--redglow) 50%, transparent 68%);
-            transform: translate3d(-100%, 0, 0);
-            opacity: 0;
-            transition: transform .5s cubic-bezier(.2, .8, .2, 1), opacity .22s ease;
+            border-radius: inherit;
             pointer-events: none;
             z-index: 0;
+            opacity: 0;
+            background-image: linear-gradient(100deg, transparent 30%, var(--redglow) 50%, transparent 70%);
+            background-repeat: no-repeat;
+            background-size: 250% 100%;
+            background-position: 130% 0;
+            transition: background-position .5s cubic-bezier(.2, .8, .2, 1), opacity .22s ease;
         }
         .setting-row > *,
         .setting-row-right {
@@ -2977,7 +2980,7 @@
         .setting-row:focus-within::after,
         .theme-option:hover::after {
             opacity: 1;
-            transform: translate3d(100%, 0, 0);
+            background-position: -30% 0;
         }
         .setting-row:hover .setting-row-ico,
         .theme-option:hover .theme-swatch {
@@ -2989,14 +2992,14 @@
             transition: transform .18s cubic-bezier(.2, .8, .2, 1);
         }
         body.reduce-motion .setting-row::after,
-        body.reduce-motion .theme-option::after,
-        body.no-anim .setting-row::after,
-        body.no-anim .theme-option::after {
+        body.reduce-motion .theme-option::after {
             display: none;
         }
+        /* `no-anim` is the Hero Animations switch, not a motion preference; the
+           settings feedback should not answer to it. */
         @media (prefers-reduced-motion: reduce) {
             .setting-row::after,
-            .theme-option::after { transition: none; opacity: 0; }
+            .theme-option::after { display: none; }
         }
 
         /* ── theme picker (Nebula-style swatches) ── */
@@ -6258,6 +6261,13 @@
            the shipped version has no entry — "a visible What's-New entry for every
            release" used to be a rule someone had to remember twice per release. */
         const CHANGELOG = [
+            {
+                ver: '2.0.9', date: '2026-11-15', items: [
+                    ['check-circle', 'Toggle tooltips are whole again', 'The hover effect added last release clipped each settings card to keep its light sweep inside — and the "Full Playlist: Enabled" tooltip that pops above the switch was clipped with it. The sweep now paints inside its own box, so nothing needs clipping.'],
+                    ['gauge', 'A warning that can be taken back', 'If one Spotify download failed and the twenty after it worked, the "Spotify is unavailable" notice stayed for the rest of the session. A download that succeeds now clears the notice it contradicts.'],
+                    ['slider', 'Calm Motion owns the hover effect', 'Turning off Hero Animations no longer switches off the settings feedback; only a motion preference does.'],
+                ],
+            },
             {
                 ver: '2.0.8', date: '2026-11-15', items: [
                     ['gauge', 'The Spotify warning was wrong, so it is gone', 'IDLR asked the app process whether it could import spotdl — but spotdl ships in its own helper process, so every installed copy reported "Spotify is unavailable" while Spotify downloads worked fine. It now checks the helper is there, and a helper that fails a real download says so then — so the strip and the "YouTube match" badge only appear when it is genuinely true.'],
