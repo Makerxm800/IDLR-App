@@ -10,7 +10,7 @@ Everything runs locally on your machine.
 ![yt‑dlp](https://img.shields.io/badge/yt--dlp-latest-orange)
 ![spotdl](https://img.shields.io/badge/spotdl-latest-brightgreen)
 
-> **Current version: v2.0.5** — a native Tauri desktop app with a bundled media worker, plus a local browser option. Both use the same features and local data, with layouts designed for their respective screens.
+> **Current version: v2.0.6** — a native Tauri desktop app with a bundled media worker, plus a local browser option. Both use the same features and local data, with layouts designed for their respective screens.
 
 [Download the latest Windows setup](https://github.com/Makerxm800/IDLR-App/releases/latest/download/IDLR-App-Setup.exe) · [All releases](https://github.com/Makerxm800/IDLR-App/releases)
 
@@ -274,7 +274,9 @@ idlr/
 
 ## 📜 Changelog
 
-### v2.0.5 — stays open, says what is wrong, and feels like Windows
+### v2.0.6 — stays open, says what is wrong, feels like Windows, and opens faster
+
+- **The macOS release job works again, and can no longer stop a release.** GitHub retired the `macos-14` runner image on 2026-11-02, so every job asking for it was cancelled before a runner was assigned — which reads as "macos was cancelled" in the Actions UI and, previously, meant no installers at all. macOS now builds on `macos-15`, is its own job instead of a matrix leg, and no macOS outcome (cancelled, timed out, even a broken build) blocks publishing Windows and Linux: the release simply has no DMG and no `darwin-*` entry in `latest.json`, so Mac installs keep their current version and take the next release that does build. `tests/test_workflows.py` fails if a retired runner label comes back.
 
 - **Fixed the "IDLR deleted itself" crash.** The old startup ran `pip install`, downloaded FFmpeg, and called `sys.exit(1)` while importing — in a packaged build that killed the bundled worker, and the runtime download/extraction is what antivirus reacts to. Nothing is installed or created at runtime any more; a missing required component is a logged error, and FFmpeg can never block startup.
 - **The window opens even when the download helper is gone.** A quarantined `idlr-worker.exe` no longer aborts the Tauri shell: the app starts, downloads pause, and a banner explains the cause with **Try again** and copyable recovery steps. The helper answers `503` with the real reason instead of dying silently, and is restarted on demand.

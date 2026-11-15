@@ -38,22 +38,42 @@ class ReleaseWorkflowTests(unittest.TestCase):
                           "a workflow runs the suite without IDLR_NO_AUTO_INSTALL")
 
     def test_all_three_platforms_are_still_tested(self):
-        for os_name in ("windows-latest", "ubuntu-24.04", "macos-14"):
-            self.assertIn(os_name, RELEASE, f"{os_name} disappeared from the release matrix")
+        for os_name in ("windows-latest", "ubuntu-24.04", "macos-15"):
+            self.assertIn(os_name, RELEASE, f"{os_name} disappeared from the release workflow")
             self.assertIn(os_name, TESTS, f"{os_name} disappeared from the PR test matrix")
+
+    def test_no_retired_runner_label_is_referenced(self):
+        """GitHub retires runner images on its own schedule, and the failure looks
+        exactly like a broken build: `runner: ""`, zero steps, cancelled in one
+        second. `macos-14` was retired on 2026-11-02 and cost a release attempt,
+        so a retired label must not come back by copy-paste."""
+        # Only the lines that *request* a runner: the workflows discuss retired
+        # images in comments on purpose, and a check that forbids mentioning one
+        # is a check that gets deleted the first time it annoys someone.
+        requested = []
+        for name, source in (("idlr-app-release.yml", RELEASE), ("tests.yml", TESTS)):
+            for line in source.splitlines():
+                if re.match(r"^\s*(runs-on:|os:\s*\[)", line):
+                    requested.append((name, line.strip()))
+        self.assertGreaterEqual(len(requested), 4, "no runner requests were parsed at all")
+        for label in ("macos-12", "macos-13", "macos-14", "ubuntu-20.04", "windows-2019"):
+            for name, line in requested:
+                self.assertNotIn(label, line, f"{name} still asks for the retired {label} image")
 
     def test_macos_cannot_block_a_windows_release(self):
         """macOS runners cost 10x the included minutes, so that leg can be
-        cancelled with no runner ever assigned. It must be its own job, and
-        publish must tolerate exactly that outcome — while a macOS build that
-        actually fails still stops the release."""
+        cancelled with no runner ever assigned. It must be its own job and every
+        macOS outcome must be tolerated — including a build that genuinely fails,
+        because that is a red job someone can go fix, not a reason the Windows
+        users wait for it."""
         self.assertIn("  build-macos:\n", RELEASE, "macOS must not share a matrix with Windows/Linux")
         publish = job_body(RELEASE, "publish")
         condition = re.search(r"if: >-\n((?: +[^\n]*\n)+)", publish).group(1)
-        self.assertIn("needs.build-macos.result == 'cancelled'", condition)
-        self.assertIn("needs.build-macos.result == 'success'", condition)
-        self.assertNotIn("needs.build-macos.result == 'failure'", condition,
-                         "a broken macOS build has to stop the release")
+        for outcome in ("success", "skipped", "cancelled", "failure", "timed_out", "action_required"):
+            self.assertIn(f"needs.build-macos.result == '{outcome}'", condition,
+                          f"a macOS '{outcome}' would block the whole release")
+        # …and the manifest has to be told, or create_updater_manifest.py refuses.
+        self.assertIn('if [ "${{ needs.build-macos.result }}" = "success" ]; then', RELEASE)
         self.assertIn("needs.build-desktop.result == 'success'", condition,
                       "Windows/Linux must still be required outright")
 
@@ -85,7 +105,11 @@ class ReleaseWorkflowTests(unittest.TestCase):
             body = job_body(RELEASE, job)
             self.assertIn("- name: Verify the shared FFmpeg was bundled", body,
                           f"{job} must check that the staged FFmpeg reached the bundle")
+            self.assertIn('echo "::error::build.py never staged dist/ffmpeg', body,
+                          "a bundle with no shared FFmpeg at all must fail the job")
             self.assertIn("find src-tauri/target", body)
+            self.assertIn('echo "::warning::dist/ffmpeg has FFmpeg but nothing matched', body,
+                          "an unfamiliar resource layout must not fail a release")
             self.assertIn("FFmpeg-not-staged.txt", body,
                           "a build without FFmpeg is allowed, it must not be a surprise")
 
