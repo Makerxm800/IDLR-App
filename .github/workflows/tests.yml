@@ -35,7 +35,10 @@ jobs:
       # that disagree with each other.
       fail-fast: false
       matrix:
-        os: [windows-latest, ubuntu-24.04, macos-14]
+        # macos-15, not macos-14: GitHub retired the macOS 14 image on
+        # 2026-11-02 and every job requesting it is cancelled before a runner is
+        # assigned, which looks like a broken build and is not one.
+        os: [windows-latest, ubuntu-24.04, macos-15]
 
     steps:
       - uses: actions/checkout@v7
