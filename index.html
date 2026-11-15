@@ -4749,10 +4749,11 @@
          Every glyph in the app used to be an emoji character. That looks
          different on every OS (Segoe UI Emoji vs Apple Color Emoji), sits on a
          different baseline and at a different width than the text beside it, and
-         ignores the theme — so a "🎬 Movies & HLS" chip next to a "▶ YouTube"
-         one never lined up. These are real strokes drawn in currentColor at 1.8
-         in a 24 grid, so they inherit the theme, scale with the text they sit
-         next to, and stay identical everywhere.
+         ignores the theme — so a film-pictograph chip beside a play-triangle
+         chip never lined up, and neither could be clicked. These are real
+         strokes drawn in currentColor at 1.8 in a 24 grid: they inherit the
+         theme, scale with the text they sit next to, and stay identical
+         everywhere.
 
          Inlined rather than fetched or icon-fonnected: the desktop build loads
          index.html from inside the app bundle with no guarantee of a network, and

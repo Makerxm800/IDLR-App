@@ -109,6 +109,62 @@ class FrontendConsistencyTests(unittest.TestCase):
                 f".{strip} is not a positioning parent for its indicator",
             )
 
+    def test_every_icon_reference_resolves(self):
+        """A `<use href="#i-…">` into a missing symbol renders *nothing*, in silence.
+
+        That is the worst possible failure for an icon system: the button keeps its
+        padding and its label and looks intentional. So every name that can reach
+        the sprite has to have a symbol behind it.
+        """
+        symbols = set(re.findall(r'<symbol id="(i-[\w-]+)"', self.html))
+        self.assertTrue(symbols, "the icon sprite disappeared")
+
+        refs = set()
+        # literal markup, and the two helper call shapes
+        refs |= set(re.findall(r'<use href="#i-([\w-]+)"', self.html))
+        refs |= set(re.findall(r"\bicon\(\s*['\"]([\w-]+)['\"]", self.html))
+        # SITES[].icon feeds siteIcon(), which builds `#i-<name>`
+        refs |= set(re.findall(r"\bicon:\s*['\"]([\w-]+)['\"]", self.html))
+        # the toast/notification kind tables map a kind to an icon name; read only
+        # their bodies, or every `key: 'value'` in the file looks like an icon
+        for table in ("TOAST_KIND", "NOTIF_META"):
+            body = re.search(r"const " + table + r" = \{(.*?)\};", self.html, re.S)
+            self.assertIsNotNone(body, f"{table} is gone, so its icon names are unchecked")
+            refs |= set(re.findall(r"icon:\s*['\"]([\w-]+)['\"]", body.group(1)))
+            # TOAST_KIND is `ok: 'check-circle'`, i.e. the value *is* the icon
+            if "ok:" in body.group(1):
+                refs |= set(re.findall(r":\s*['\"]([\w-]+)['\"]", body.group(1)))
+
+        missing = sorted(r for r in refs if f"i-{r}" not in symbols)
+        self.assertEqual(missing, [], "icons referenced but never defined: " + ", ".join(missing))
+
+    def test_no_color_emoji_in_the_interface(self):
+        """Emoji are a font fallback, not a design decision.
+
+        They sit on a different baseline and at a different width than the text
+        beside them, ignore the theme, and change shape between Windows and macOS —
+        which is exactly why "🎬 Movies & HLS" never lined up with "▶ YouTube".
+        Monochrome dingbats (✓ ✕ ★ ›) are punctuation-like and still allowed.
+        """
+        bad = re.compile("[\U0001F000-\U0001FAFF\U0001F1E6-\U0001F1FF]")
+        # A comment may quote an old emoji for context; only rendered markup counts.
+        lines = [i for i, ln in enumerate(self.markup.split("\n"), 1) if bad.search(ln)]
+        self.assertEqual(lines, [], f"color emoji on lines {lines[:12]}")
+
+    def test_the_changelog_covers_the_shipped_version(self):
+        """"Every release gets a visible What's-New entry" used to be a rule you
+        either remembered or did not. Now it is a failing test: the version in
+        app.py must be the first entry of the CHANGELOG the modal renders."""
+        version = re.search(r'APP_VERSION\s*=\s*"([^"]+)"',
+                            (INDEX.parent / "app.py").read_text(encoding="utf-8")).group(1)
+        block = re.search(r"const CHANGELOG = \[(.*?)\n        \];", self.html, re.S)
+        self.assertIsNotNone(block, "the CHANGELOG array is missing")
+        first = re.search(r"ver:\s*'([\d.]+)'", block.group(1))
+        self.assertEqual(
+            first and first.group(1), version,
+            f"v{version} has no What's-New entry at the top of the changelog",
+        )
+
     def test_indicator_elements_are_not_display_hidden(self):
         """A `display:none` indicator silently kills the whole animation."""
         for selector in (".tab-indicator", ".hist-indicator"):

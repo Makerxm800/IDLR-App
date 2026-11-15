@@ -10,7 +10,7 @@ Everything runs locally on your machine.
 ![yt‑dlp](https://img.shields.io/badge/yt--dlp-latest-orange)
 ![spotdl](https://img.shields.io/badge/spotdl-latest-brightgreen)
 
-> **Current version: v2.0.6** — a native Tauri desktop app with a bundled media worker, plus a local browser option. Both use the same features and local data, with layouts designed for their respective screens.
+> **Current version: v2.0.7** — a native Tauri desktop app with a bundled media worker, plus a local browser option. Both use the same features and local data, with layouts designed for their respective screens.
 
 [Download the latest Windows setup](https://github.com/Makerxm800/IDLR-App/releases/latest/download/IDLR-App-Setup.exe) · [All releases](https://github.com/Makerxm800/IDLR-App/releases)
 
@@ -273,6 +273,16 @@ idlr/
 ---
 
 ## 📜 Changelog
+
+### v2.0.7 — the interface stops guessing
+
+- **History knows where your files went.** `_save_hist()` records the destination folder, the resolved output file and its size, and a new `POST /api/reveal` opens that entry in Explorer / Finder / `xdg-open`. The endpoint takes a *history entry*, never a path, because a localhost UI with no auth must not become a "reveal any file on this machine" primitive; argv is always a list, since `&` and quotes are legal in filenames. Rows gained the size and a folder button, the header says how many downloads and how many megabytes, and a compact density fits roughly twice as many per screen.
+- **No emoji, real icons.** About 80 pictographs (🎬 📱  🗑 …) are gone, replaced by an inline `<symbol>` sprite drawn in `currentColor` at a shared 1.8 stroke. Emoji sit on a different baseline and width than the text beside them, ignore the theme, and differ between Segoe UI Emoji and Apple Color Emoji — which is exactly why the old chip row looked uneven. Inline rather than a font or CDN because the desktop bundle may be opened offline.
+- **`Sites` is a control now.** The hero's six decorative chips (not buttons, not clickable, half emoji, a hand-typed subset) became one toggle that opens the real list — grouped by kind, generated from the same `SITES` table URL detection reads, so a new extractor appears in the UI in the same commit it lands in the detector. The Info panel's chips stay, as asked, but are generated too.
+- **Notifications grew up, and tell the truth about themselves.** The panel groups by day, filters unread/failed, shows an age, and clicking a job's row jumps to it. `Download Alerts` used to promise "notify when done / failed" while no system notification was ever sent; the row now reports the browser's permission state (granted / blocked / unsupported) and requests it, with the bell list as the fallback where the webview will not deliver.
+- **Settings explain themselves.** Every switch has an ⓘ that says what it actually changes ("Full Playlist" is a two-hundred-item queue, and that should be said out loud), rows render from state through one function so the caption cannot disagree with the switch, the version pill no longer sits under the close button it collided with, and Reset to defaults exists.
+- **Warnings that mean what they say.** A missing `spotdl` and a missing `flask` both produced the same orange "IDLR needs one more thing" banner, so the banner people learn to dismiss was the one that stops downloads. `/api/info` problems now carry a `severity` (dismissible notice vs blocking) and the `reason` — the exception text that used to reach only the log file — and Info gained **Copy diagnostics**.
+- **What's New is data.** The modal and the Info panel render from one `CHANGELOG` array, and `tests/test_frontend.py` fails if the shipped version has no entry, instead of trusting someone to edit two places per release.
 
 ### v2.0.6 — stays open, says what is wrong, feels like Windows, and opens faster
 

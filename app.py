@@ -9,7 +9,7 @@ import io
 import importlib.util
 from pathlib import Path
 
-APP_VERSION = "2.0.6"
+APP_VERSION = "2.0.7"
 APP_DIR = os.path.join(os.path.expanduser("~"), ".idlr_app")
 os.makedirs(APP_DIR, exist_ok=True)
 _YTDLP_UPDATE_STATE = os.path.join(APP_DIR, "ytdlp-update.json")
