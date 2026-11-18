@@ -458,13 +458,18 @@ class DirectMediaDownloadTests(unittest.TestCase):
             for path in (source, final, outside):
                 Path(path).write_bytes(b"video")
 
+            # _job_output_file answers with the *resolved* path (realpath), so
+            # compare against that form: on macOS tempfile lives under /var,
+            # which is a symlink to /private/var, and on Windows CI the temp
+            # root is an 8.3 short name — both spellings name the same file,
+            # but only the resolved one can come back.
             job = {}
             idlr._hook(job, {"status": "finished", "filename": source})
-            self.assertEqual(idlr._job_output_file(job, folder), source)
+            self.assertEqual(idlr._job_output_file(job, folder), os.path.realpath(source))
             idlr._postprocessor_hook(job, {
                 "status": "finished", "info_dict": {"filepath": final},
             })
-            self.assertEqual(idlr._job_output_file(job, folder), final)
+            self.assertEqual(idlr._job_output_file(job, folder), os.path.realpath(final))
             job["file_path"] = outside
             self.assertEqual(idlr._job_output_file(job, folder), "",
                              "a history row must never point outside its download folder")
