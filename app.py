@@ -9,7 +9,7 @@ import io
 import importlib.util
 from pathlib import Path
 
-APP_VERSION = "2.0.10"
+APP_VERSION = "2.0.11"
 APP_DIR = os.path.join(os.path.expanduser("~"), ".idlr_app")
 os.makedirs(APP_DIR, exist_ok=True)
 _YTDLP_UPDATE_STATE = os.path.join(APP_DIR, "ytdlp-update.json")
@@ -620,10 +620,49 @@ def local_ip():
 def is_spotify(url):
     return "spotify.com" in url or url.startswith("spotify:")
 
+_DIRECT_HLS_EXTS = {".m3u8", ".m3u", ".ts", ".m2ts", ".mts"}
+_DIRECT_VIDEO_EXTS = {
+    ".mp4", ".mkv", ".webm", ".avi", ".mov", ".flv", ".m4v", ".f4v",
+    ".3gp", ".m2v", ".wmv", ".mpeg", ".mpg", ".ogv",
+}
+
+
+def _direct_media_extension(url):
+    """Return the media extension before URL query/fragment data, if any.
+
+    Signed HLS URLs commonly look like ``master.m3u8?token=...`` and browser
+    links can include ``#t=`` fragments. Comparing the entire URL meant those
+    streams missed the direct-media path and went through a video-page format
+    selector instead.
+    """
+    path = str(url or "").strip().split("#", 1)[0].split("?", 1)[0]
+    return os.path.splitext(path)[1].lower()
+
+
+def _direct_media_kind(url):
+    extension = _direct_media_extension(url)
+    if extension in _DIRECT_HLS_EXTS:
+        return "hls"
+    if extension in _DIRECT_VIDEO_EXTS:
+        return "video"
+    return ""
+
+
 def is_hls_or_direct(url):
-    """Direct HLS/m3u8 stream or direct video file URL"""
-    u = url.lower().split("?")[0]
-    return any(u.endswith(ext) for ext in (".m3u8",".m3u",".ts",".mp4",".mkv",".webm",".avi",".mov",".flv"))
+    """Whether a URL points directly at an HLS playlist or a video file."""
+    return bool(_direct_media_kind(url))
+
+
+def _direct_hls_format(quality):
+    """Select a requested HLS height, falling back safely for single variants."""
+    heights = {
+        "8K": 4320, "4K": 2160, "1440p": 1440, "1080p": 1080,
+        "720p": 720, "480p": 480, "360p": 360, "240p": 240, "144p": 144,
+    }
+    height = heights.get(str(quality))
+    if not height:
+        return "bestvideo+bestaudio/best"
+    return f"bestvideo[height<={height}]+bestaudio/best[height<={height}]/best"
 
 def default_download_dir():
     return os.path.join(os.path.expanduser("~"), "Downloads")
@@ -742,6 +781,9 @@ def get_movie_opts(job, url, quality, fmt, savepath):
         "hls_prefer_native": False,       # use ffmpeg for HLS (more reliable)
         "hls_use_mpegts": True,
         "allow_unplayable_formats": False,
+        # Do not claim a movie completed after silently dropping a missing
+        # segment. Retry it (fragment_retries below), then report the failure.
+        "skip_unavailable_fragments": False,
         # Generic extractor — try hard to find video on any page
         "force_generic_extractor": False,
         "geo_bypass": True,
@@ -768,6 +810,43 @@ def get_movie_opts(job, url, quality, fmt, savepath):
     opts["format"] = q_map.get(quality, "bestvideo+bestaudio/best")
     opts["merge_output_format"] = out_fmt
     return opts
+
+
+def _configure_direct_media_opts(opts, media_kind, extension, is_audio, fmt, quality):
+    """Use stream-safe options for direct HLS playlists and video-file URLs.
+
+    A previous unconditional ``merge_output_format = mp4`` changed audio-only
+    direct links back into video downloads, and an optional thumbnail postprocessor
+    could turn an otherwise valid HLS stream into a failed job. Direct sources have
+    no dependable cover metadata, so this path focuses on the media itself and
+    only remuxes when the requested container differs from the source.
+    """
+    if not media_kind:
+        return False
+
+    opts["writethumbnail"] = False
+    if is_audio:
+        # HLS may be a muxed stream rather than an audio-only rendition. Let
+        # FFmpeg extract audio from the selected media instead of asking yt-dlp's
+        # video-page selector to find a separate bestaudio track.
+        opts["format"] = "best"
+        opts.pop("merge_output_format", None)
+        opts["postprocessors"] = [
+            processor for processor in opts.get("postprocessors", [])
+            if isinstance(processor, dict) and processor.get("key") == "FFmpegExtractAudio"
+        ]
+        return True
+
+    target = fmt if fmt in ("mp4", "mkv", "webm") else "mp4"
+    opts["format"] = _direct_hls_format(quality) if media_kind == "hls" else "best"
+    opts["merge_output_format"] = target
+    opts["postprocessors"] = []
+    if extension != "." + target:
+        opts["postprocessors"].append({
+            "key": "FFmpegVideoRemuxer",
+            "preferedformat": target,
+        })
+    return True
 
 SCRIPT_DIR = getattr(sys, "_MEIPASS", os.path.dirname(os.path.abspath(__file__)))
 app = Flask(__name__, static_folder=SCRIPT_DIR, template_folder=SCRIPT_DIR)
@@ -1463,6 +1542,7 @@ def _ytdlp_run(job, url, mode, quality, fmt, savepath, user,
 
     # Use movie-grade opts for all downloads (HLS support, browser headers)
     opts = get_movie_opts(job, url, quality, fmt, savepath)
+    opts["postprocessor_hooks"] = [lambda d: _postprocessor_hook(job, d)]
     is_playlist_mode = "Playlist" in mode
     opts["noplaylist"] = not (is_playlist_mode or playlist_all)
 
@@ -1490,11 +1570,12 @@ def _ytdlp_run(job, url, mode, quality, fmt, savepath, user,
             opts["writethumbnail"] = False
             opts["postprocessors"] = []
 
-    # If it's a direct HLS/m3u8 URL, force ffmpeg concat
-    if is_hls_or_direct(url):
-        opts["format"] = "best"
-        opts["merge_output_format"] = "mp4"
-        _log_to(job, {"t":"🎬 Direct stream detected — using HLS downloader","c":"dim"})
+    media_kind = _direct_media_kind(url)
+    if media_kind:
+        _configure_direct_media_opts(
+            opts, media_kind, _direct_media_extension(url), is_audio, fmt, quality)
+        label = "Direct HLS stream" if media_kind == "hls" else "Direct video file"
+        _log_to(job, {"t": f"{label} — downloading stream segments and finalizing the file", "c": "dim"})
 
     title = url; thumb = ""
     try:
@@ -1541,7 +1622,8 @@ def _ytdlp_run(job, url, mode, quality, fmt, savepath, user,
         job.update({"status":"done","progress":100,"done":True})
         _log_to(job, {"t": f"✓ Saved to {savepath}","c":"ok"})
         log("YT-DLP", f"[{job_id}] DONE -> {savepath}")
-        _save_hist(user, url, title, thumb, mode, quality, fmt, "done", folder=savepath)
+        _save_hist(user, url, title, thumb, mode, quality, fmt, "done",
+                   folder=savepath, path_hint=_job_output_file(job, savepath))
 
     except Exception as e:
         err_msg = _friendly_dl_error(str(e))
@@ -1570,8 +1652,8 @@ def _trim_history(hist):
     return kept
 
 
-_MEDIA_EXTS = {".mp4", ".mkv", ".webm", ".mov", ".avi", ".flv", ".ts", ".m4v",
-               ".mp3", ".m4a", ".opus", ".ogg", ".wav", ".flac", ".aac"}
+_MEDIA_EXTS = _DIRECT_VIDEO_EXTS | {".ts", ".m2ts", ".mts", ".mp3", ".m4a",
+                                     ".opus", ".ogg", ".wav", ".flac", ".aac"}
 
 
 def _title_key(name):
@@ -1776,10 +1858,55 @@ def start_download():
     threading.Thread(target=run, daemon=True).start()
     return jsonify(job_id=jid)
 
+def _capture_job_output(job, candidate):
+    """Remember an actual output path reported by yt-dlp, never a guess."""
+    if not isinstance(candidate, str) or not candidate:
+        return
+    try:
+        path = os.path.abspath(os.path.expanduser(candidate))
+        if os.path.isfile(path) and not path.lower().endswith((".part", ".ytdl", ".temp")):
+            job["file_path"] = path
+    except (OSError, ValueError):
+        pass
+
+
+def _postprocessor_hook(job, d):
+    """Capture yt-dlp's final filename after remuxing/conversion has finished."""
+    try:
+        info = d.get("info_dict") if isinstance(d, dict) else None
+        if not isinstance(info, dict):
+            info = {}
+        _capture_job_output(job, info.get("filepath") or info.get("_filename")
+                            or d.get("filename"))
+    except Exception:
+        # A history-path hint is optional; it must never abort the media job.
+        pass
+
+
+def _job_output_file(job, savepath):
+    """Return the captured file only when it really landed in this job's folder."""
+    candidate = job.get("file_path") if isinstance(job, dict) else None
+    if not isinstance(candidate, str) or not candidate:
+        return ""
+    try:
+        path = os.path.realpath(os.path.abspath(candidate))
+        folder = os.path.realpath(os.path.abspath(savepath))
+        if os.path.normcase(os.path.commonpath((path, folder))) != os.path.normcase(folder):
+            return ""
+        return path if os.path.isfile(path) else ""
+    except (OSError, ValueError):
+        return ""
+
+
 def _hook(job, d):
     # Never let a weird progress value kill the download: hook exceptions
     # propagate up through yt-dlp and abort everything.
     try:
+        info = d.get("info_dict") if isinstance(d, dict) else None
+        if not isinstance(info, dict):
+            info = {}
+        _capture_job_output(job, info.get("filepath") or info.get("_filename")
+                            or d.get("filename"))
         if d["status"]=="downloading":
             raw=d.get("_percent_str","0%").strip()
             try: pct=float(re.sub(r"[^\d.]","",raw) or 0)
@@ -2153,7 +2280,7 @@ def _print_startup(port, desktop=False):
         _p("  Keep this window OPEN while using the app. Press Ctrl+C to stop.\n")
 
 
-def _serve_in_browser(host, port):
+def _serve_in_browser(host, port, auto_open=True):
     global SERVER_URL
     from werkzeug.serving import make_server
 
@@ -2162,7 +2289,10 @@ def _serve_in_browser(host, port):
     SERVER_URL = f"http://{local_ip() if host == '0.0.0.0' else 'localhost'}:{actual_port}"
     _print_startup(actual_port)
     url = f"http://localhost:{actual_port}"
-    threading.Timer(1.0, lambda: webbrowser.open(url)).start()
+    if auto_open:
+        threading.Timer(1.0, lambda: webbrowser.open(url)).start()
+    else:
+        log("DESKTOP", f"Browser auto-open is off; open {url} manually or start with --browser.")
     try:
         server.serve_forever()
     finally:
@@ -2176,8 +2306,8 @@ def _run_desktop():
     except ImportError as exc:
         if getattr(sys, "frozen", False):
             raise RuntimeError("The desktop window component is missing from this IDLR build.") from exc
-        log("DESKTOP", "pywebview is not installed; opening IDLR in your browser instead.")
-        return _serve_in_browser("127.0.0.1", 5000)
+        log("DESKTOP", "pywebview is not installed; serving IDLR without auto-opening a browser. Use --browser to open it on purpose.")
+        return _serve_in_browser("127.0.0.1", 5000, auto_open=False)
 
     from werkzeug.serving import make_server
 

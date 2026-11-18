@@ -6,7 +6,7 @@ use std::{
     fs::{self, OpenOptions},
     io::{BufRead, BufReader, BufWriter, Read, Write},
     net::{TcpListener, TcpStream},
-    path::{Path, PathBuf},
+    path::{Component, Path, PathBuf},
     process::{Child, ChildStdin, ChildStdout, Command, Stdio},
     sync::{
         Mutex,
@@ -18,7 +18,7 @@ use std::{
 use tauri::{AppHandle, Manager, State};
 use tauri_plugin_updater::UpdaterExt;
 
-const APP_VERSION: &str = "2.0.10";
+const APP_VERSION: &str = "2.0.11";
 const MAX_HTTP_HEADER_BYTES: usize = 16 * 1024;
 const MAX_HTTP_BODY_BYTES: usize = 1024 * 1024;
 static TEMP_FILE_SEQUENCE: AtomicU64 = AtomicU64::new(0);
@@ -768,8 +768,10 @@ fn browser_server(app: AppHandle, listener: TcpListener, assets: PathBuf, port: 
 fn open_browser(url: &str) -> std::io::Result<()> {
     #[cfg(target_os = "windows")]
     {
-        Command::new("cmd")
-            .args(["/C", "start", "", url])
+        use std::os::windows::process::CommandExt;
+        Command::new("explorer.exe")
+            .arg(url)
+            .creation_flags(0x08000000)
             .spawn()
             .map(|_| ())
     }
@@ -820,6 +822,155 @@ fn expand_save_path(raw: &str) -> PathBuf {
             .into_owned();
     }
     PathBuf::from(path)
+}
+
+fn default_download_dir() -> PathBuf {
+    let home = std::env::var_os("USERPROFILE")
+        .or_else(|| std::env::var_os("HOME"))
+        .map(PathBuf::from)
+        .unwrap_or_else(|| PathBuf::from("."));
+    home.join("Downloads")
+}
+
+fn normalized_reveal_path(path: &Path) -> PathBuf {
+    let absolute = if path.is_absolute() {
+        path.to_path_buf()
+    } else {
+        std::env::current_dir().unwrap_or_default().join(path)
+    };
+    let resolved = fs::canonicalize(&absolute).unwrap_or(absolute);
+    let mut normalized = PathBuf::new();
+    for component in resolved.components() {
+        match component {
+            Component::CurDir => {}
+            Component::ParentDir => {
+                normalized.pop();
+            }
+            other => normalized.push(other.as_os_str()),
+        }
+    }
+    normalized
+}
+
+fn reveal_path_key(path: &Path) -> String {
+    let normalized = normalized_reveal_path(path);
+    let value = normalized.to_string_lossy().into_owned();
+    if cfg!(windows) {
+        value.to_lowercase()
+    } else {
+        value
+    }
+}
+
+fn reveal_path_is_within(path: &Path, folder: &Path) -> bool {
+    let path = reveal_path_key(path);
+    let folder = reveal_path_key(folder);
+    if path == folder {
+        return true;
+    }
+    let separator = std::path::MAIN_SEPARATOR;
+    let prefix = if folder.ends_with(separator) {
+        folder
+    } else {
+        format!("{folder}{separator}")
+    };
+    path.starts_with(&prefix)
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum RevealTarget {
+    File(PathBuf),
+    Folder(PathBuf),
+}
+
+fn resolve_reveal_target(
+    user: &str,
+    url: &str,
+    requested_folder: &str,
+    accounts: &Map<String, Value>,
+    history: &[Value],
+) -> Result<RevealTarget, (u16, String)> {
+    let user = user.trim().to_lowercase();
+    if !url.is_empty() {
+        if let Some(entry) = history.iter().find(|entry| {
+            get_string(entry, "user").eq_ignore_ascii_case(&user)
+                && get_string(entry, "url") == url
+        }) {
+            let folder_raw = get_string(entry, "folder").trim();
+            let folder = (!folder_raw.is_empty())
+                .then(|| normalized_reveal_path(&expand_save_path(folder_raw)));
+            let file_raw = get_string(entry, "file").trim();
+            if !file_raw.is_empty() {
+                let file = normalized_reveal_path(&expand_save_path(file_raw));
+                let is_safe_file = folder
+                    .as_ref()
+                    .is_some_and(|folder| reveal_path_is_within(&file, folder));
+                if is_safe_file && file.is_file() {
+                    return Ok(RevealTarget::File(file));
+                }
+            }
+            if let Some(folder) = folder.filter(|folder| folder.is_dir()) {
+                return Ok(RevealTarget::Folder(folder));
+            }
+            return Err((
+                404,
+                "IDLR can't find that file any more — it may have been moved, renamed, or deleted."
+                    .to_string(),
+            ));
+        }
+    }
+
+    let account = accounts.get(&user);
+    let prefs = account
+        .and_then(|account| account.get("prefs"))
+        .and_then(Value::as_object);
+    let saved_folder = prefs
+        .and_then(|prefs| prefs.get("savepath").or_else(|| prefs.get("path")))
+        .and_then(Value::as_str)
+        .unwrap_or_default()
+        .trim();
+
+    let mut allowed = vec![default_download_dir()];
+    if !saved_folder.is_empty() {
+        allowed.push(expand_save_path(saved_folder));
+    }
+    allowed.extend(history.iter().filter_map(|entry| {
+        if get_string(entry, "user").eq_ignore_ascii_case(&user) {
+            let folder = get_string(entry, "folder").trim();
+            (!folder.is_empty()).then(|| expand_save_path(folder))
+        } else {
+            None
+        }
+    }));
+
+    let requested_folder = requested_folder.trim();
+    let target = if requested_folder.is_empty() {
+        if saved_folder.is_empty() {
+            default_download_dir()
+        } else {
+            expand_save_path(saved_folder)
+        }
+    } else {
+        let requested = expand_save_path(requested_folder);
+        let requested_key = reveal_path_key(&requested);
+        if !allowed.iter().any(|allowed| reveal_path_key(allowed) == requested_key) {
+            return Err((
+                404,
+                "IDLR only opens folders it saves into. Yours are the Downloads folder and the one shown in Settings > Download folder."
+                    .to_string(),
+            ));
+        }
+        requested
+    };
+    let target = normalized_reveal_path(&target);
+    if !target.is_dir() {
+        return Err((
+            404,
+            "That save folder does not exist any more — choose it again in Settings and IDLR will create it."
+                .to_string(),
+        ));
+    }
+    Ok(RevealTarget::Folder(target))
 }
 
 fn validate_save_path(raw: &str) -> ApiResponse {
@@ -1230,6 +1381,101 @@ fn history_request(
     Ok(Some(reply))
 }
 
+fn open_reveal_target(target: &RevealTarget) -> std::io::Result<()> {
+    let (path, select) = match target {
+        RevealTarget::File(path) => (path.as_path(), true),
+        RevealTarget::Folder(path) => (path.as_path(), false),
+    };
+
+    #[cfg(target_os = "windows")]
+    let mut command = {
+        let mut command = Command::new("explorer.exe");
+        if select {
+            command.arg(format!("/select,{}", path.display()));
+        } else {
+            command.arg(path);
+        }
+        command
+    };
+    #[cfg(target_os = "macos")]
+    let mut command = {
+        let mut command = Command::new("open");
+        if select {
+            command.arg("-R").arg(path);
+        } else {
+            command.arg(path);
+        }
+        command
+    };
+    #[cfg(all(unix, not(target_os = "macos")))]
+    let mut command = {
+        let mut command = Command::new("xdg-open");
+        // Linux desktop environments do not share a portable select-file API;
+        // opening the containing directory is the reliable equivalent.
+        let folder = if select {
+            path.parent().unwrap_or_else(|| Path::new("/"))
+        } else {
+            path
+        };
+        command.arg(folder);
+        command
+    };
+
+    #[cfg(target_os = "windows")]
+    {
+        use std::os::windows::process::CommandExt;
+        command.creation_flags(0x08000000);
+    }
+    command.spawn().map(|_| ())
+}
+
+fn reveal_request(
+    state: &AppState,
+    method: &str,
+    url: &str,
+    route: &str,
+    body: &Value,
+) -> Result<Option<ApiResponse>, String> {
+    if route != "/api/reveal" {
+        return Ok(None);
+    }
+    if method != "POST" {
+        return Ok(Some(error_reply(405, "Opening files requires a POST request.")));
+    }
+
+    let accounts = read_accounts(state)?;
+    let history = read_json(&history_path(state), json!([]))?;
+    let history = history
+        .as_array()
+        .ok_or("IDLR history data is not a valid list.")?;
+    let target = match resolve_reveal_target(
+        get_string(body, "user"),
+        get_string(body, "url"),
+        get_string(body, "folder"),
+        &accounts,
+        history,
+    ) {
+        Ok(target) => target,
+        Err((status, message)) => return Ok(Some(error_reply(status, message))),
+    };
+
+    let (kind, path) = match &target {
+        RevealTarget::File(path) => ("file", path),
+        RevealTarget::Folder(path) => ("folder", path),
+    };
+    if let Err(error) = open_reveal_target(&target) {
+        log::warn!("Could not open the download in the file manager: {error}");
+        return Ok(Some(error_reply(
+            500,
+            "Your file manager refused to open that folder.",
+        )));
+    }
+    Ok(Some(api_reply(
+        200,
+        json!({"ok": true, "kind": kind, "path": path.to_string_lossy()}),
+    )))
+}
+
 #[tauri::command]
 fn api_request(
     state: State<'_, AppState>,
@@ -1256,6 +1502,9 @@ fn api_request_for_state(
         return Ok(response);
     }
     if let Some(response) = history_request(state, &method, url, route, &body)? {
+        return Ok(response);
+    }
+    if let Some(response) = reveal_request(state, &method, url, route, &body)? {
         return Ok(response);
     }
 
@@ -1300,6 +1549,17 @@ fn api_request_for_state(
         response.body["frozen"] = json!(true);
     }
     Ok(response)
+}
+
+#[tauri::command]
+fn open_browser_view(state: State<'_, AppState>) -> Result<(), String> {
+    let url = state
+        .browser_url
+        .lock()
+        .map_err(|_| "IDLR's browser URL lock was poisoned.".to_string())?
+        .clone()
+        .ok_or_else(|| "The IDLR web view is not available right now.".to_string())?;
+    open_browser(&url).map_err(|error| format!("Could not open the IDLR web view: {error}"))
 }
 
 #[tauri::command]
@@ -1478,13 +1738,14 @@ pub fn run() {
                 .name("idlr-browser-server".into())
                 .spawn(move || browser_server(app_handle, listener, assets, port))
                 .map_err(std::io::Error::other)?;
-            if let Err(error) = open_browser(&browser_url) {
-                log::error!("Could not open IDLR in the system browser at {browser_url}: {error}");
-            }
+            // The responsive browser view is an opt-in companion. Keep its
+            // loopback service ready for the Settings button, but never launch a
+            // second window behind the native app on startup.
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
             api_request,
+            open_browser_view,
             select_folder,
             check_app_update,
             install_app_update,
@@ -1498,7 +1759,8 @@ pub fn run() {
 #[cfg(test)]
 mod tests {
     use super::{
-        TEMP_FILE_SEQUENCE, browser_request_allowed, read_http_request, read_json, write_json,
+        RevealTarget, TEMP_FILE_SEQUENCE, browser_request_allowed, normalized_reveal_path,
+        read_http_request, read_json, resolve_reveal_target, reveal_path_is_within, write_json,
     };
     use serde_json::json;
     use std::{
@@ -1532,6 +1794,87 @@ mod tests {
         );
 
         fs::remove_dir_all(test_dir).expect("remove test directory");
+    }
+
+    #[test]
+    fn reveal_uses_the_recorded_file_and_keeps_it_inside_its_download_folder() {
+        let test_dir = std::env::temp_dir().join(format!(
+            "idlr-reveal-{}-{}",
+            std::process::id(),
+            TEMP_FILE_SEQUENCE.fetch_add(1, Ordering::Relaxed)
+        ));
+        let downloads = test_dir.join("Downloads");
+        let outside = test_dir.join("Downloads backup");
+        fs::create_dir_all(&downloads).expect("create download folder");
+        fs::create_dir_all(&outside).expect("create adjacent folder");
+        let file = downloads.join("movie.mp4");
+        let unrelated = outside.join("other.mp4");
+        fs::write(&file, b"movie").expect("write movie file");
+        fs::write(&unrelated, b"other").expect("write unrelated file");
+
+        assert!(reveal_path_is_within(&file, &downloads));
+        assert!(!reveal_path_is_within(&unrelated, &downloads));
+
+        let history = vec![json!({
+            "user": "user@example.com",
+            "url": "https://source.example/movie",
+            "folder": downloads.to_string_lossy(),
+            "file": file.to_string_lossy(),
+        })];
+        let accounts = serde_json::Map::new();
+        let target = resolve_reveal_target(
+            "USER@example.com",
+            "https://source.example/movie",
+            "",
+            &accounts,
+            &history,
+        )
+        .expect("resolve a recorded download");
+        assert_eq!(target, RevealTarget::File(normalized_reveal_path(&file)));
+
+        fs::remove_dir_all(test_dir).expect("remove reveal test directory");
+    }
+
+    #[test]
+    fn reveal_rejects_an_arbitrary_folder_and_accepts_the_saved_folder_alias() {
+        let test_dir = std::env::temp_dir().join(format!(
+            "idlr-reveal-folder-{}-{}",
+            std::process::id(),
+            TEMP_FILE_SEQUENCE.fetch_add(1, Ordering::Relaxed)
+        ));
+        let music = test_dir.join("Music");
+        let secret = test_dir.join("Secret");
+        fs::create_dir_all(&music).expect("create saved folder");
+        fs::create_dir_all(&secret).expect("create unrelated folder");
+        let accounts = json!({
+            "user@example.com": {"prefs": {"savepath": music.to_string_lossy()}}
+        })
+        .as_object()
+        .cloned()
+        .expect("account map");
+
+        let alias = test_dir.join("Music").join("..").join("Music");
+        let target = resolve_reveal_target(
+            "user@example.com",
+            "",
+            alias.to_string_lossy().as_ref(),
+            &accounts,
+            &[],
+        )
+        .expect("resolve the saved folder alias");
+        assert_eq!(target, RevealTarget::Folder(normalized_reveal_path(&music)));
+
+        let denied = resolve_reveal_target(
+            "user@example.com",
+            "",
+            secret.to_string_lossy().as_ref(),
+            &accounts,
+            &[],
+        )
+        .expect_err("an unknown folder must not be opened");
+        assert_eq!(denied.0, 404);
+
+        fs::remove_dir_all(test_dir).expect("remove reveal test directory");
     }
 
     #[test]

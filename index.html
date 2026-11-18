@@ -4751,6 +4751,7 @@
             padding: 5px 10px;
             font: 600 10.5px 'DM Sans', sans-serif;
         }
+        .browser-open-btn[hidden] { display: none; }
         .dd-option .ico { vertical-align: -0.16em; }
         .dl-btn .ico, .cancel-btn .ico { vertical-align: -0.14em; }
         .now-thumb .ico { font-size: 22px; opacity: .55; }
@@ -5686,7 +5687,10 @@
                             <div class="setting-row-sub" id="sp-network-sub">Open the local IDLR interface</div>
                         </div>
                         <div class="setting-row-right">
-                            <button class="copy-btn" onclick="copyNetworkUrl(event)" title="Copy this address">
+                            <button class="pill outline browser-open-btn" id="open-browser-btn" type="button" onclick="openBrowserView()" hidden title="Open the local IDLR web view in your default browser">
+                                <svg class="ico ico-sm" aria-hidden="true"><use href="#i-external"/></svg> Open
+                            </button>
+                            <button class="copy-btn" type="button" onclick="copyNetworkUrl(event)" title="Copy this address">
                                 <svg class="ico" aria-hidden="true"><use href="#i-copy"/></svg>
                                 <span id="sp-network">localhost:5000</span>
                             </button>
@@ -6220,6 +6224,15 @@
            the shipped version has no entry — "a visible What's-New entry for every
            release" used to be a rule someone had to remember twice per release. */
         const CHANGELOG = [
+            {
+                ver: '2.0.11', date: '2026-11-18', items: [
+                    ['external', 'The browser opens only when you ask', 'Launching IDLR used to open a second browser window next to the app every single time. It never does that now: the desktop window is the app, and Settings → System → Browser URL has an Open button for the moments you want the web view on purpose.'],
+                    ['folder-open', 'Show in folder works in the app', 'Clicking it on a history row answered "Unknown IDLR command." — the desktop app simply did not know that request existed, so the button could never have worked. The app now opens the actual file selected in Explorer or Finder, falling back to its folder when the file itself has moved.'],
+                    ['film', 'HLS and movie downloads finish honestly', 'Signed stream links (the kind with ?token=… in them) were not recognised as streams at all, and a segment that failed to download was quietly skipped — so a movie could "finish" with minutes missing. Streams are detected by their real path now, a missing segment is retried and then reported as a failure, and the quality you picked is honoured instead of always grabbing the largest.'],
+                    ['file-video', 'Direct links keep the format you chose', 'A direct link to a video file was always forced to MP4 — even in Audio Only mode, which turned your MP3 back into a video. Audio links are extracted as audio, and video is only converted when you actually asked for a different container.'],
+                    ['info', 'Honest labels for tricky sources', 'The movie-site note said "trying all extractors", which read like a promise. It now says what is true: it works when the page exposes a downloadable, non-DRM stream, and the app tells you plainly when one is not there.'],
+                ],
+            },
             {
                 ver: '2.0.10', date: '2026-11-15', items: [
                     ['folder-open', 'The folder buttons work', 'Open folder on the download page, in Settings, or on a history row answered "that download is not in your history" whenever you had chosen your own folder — the app compared the path you typed with the path it stored and saw two different places. They are one place now, and the button opens it.'],
@@ -6980,14 +6993,14 @@
                 autoMode: () => 'Video', autoFmt: 'mp4', note: () => 'Reddit video detected' },
             { key: 'dc', name: 'Dailymotion', icon: 'video', brand: 'video', group: 'video', cls: 'mv', test: u => /dailymotion\.com/.test(u),
                 autoMode: () => 'Video', autoFmt: 'mp4', note: () => 'Dailymotion video detected' },
-            { key: 'hls', name: 'HLS / m3u8', icon: 'radio', brand: 'video', group: 'streams', cls: 'mv', test: u => /\.m3u8|\.m3u/.test(u.split('?')[0]
-                    .toLowerCase()), autoMode: () => 'Video', autoFmt: 'mp4',
-                note: () => 'HLS stream — will download all segments and merge' },
-            { key: 'mp4', name: 'Direct file', icon: 'file-video', brand: 'video', group: 'streams', cls: 'mv', test: u => /\.(mp4|mkv|webm|avi|mov|flv|ts)(\?|$)/.test(
-                    u.toLowerCase()), autoMode: () => 'Video', autoFmt: 'mp4',
-                note: () => 'Direct video file — downloading directly' },
+            { key: 'hls', name: 'HLS / m3u8', icon: 'radio', brand: 'video', group: 'streams', cls: 'mv', test: u => /\.(m3u8|m3u)(?:[?#]|$)/i.test(u),
+                autoMode: () => 'Video', autoFmt: 'mp4',
+                note: () => 'HLS stream — downloads segments, honors quality, then merges with FFmpeg' },
+            { key: 'mp4', name: 'Direct file', icon: 'file-video', brand: 'video', group: 'streams', cls: 'mv', test: u => /\.(mp4|mkv|webm|avi|mov|flv|ts|m4v|m2ts|mts|wmv|mpeg|mpg|ogv|3gp|f4v|m2v)(?:[?#]|$)/i.test(u),
+                autoMode: () => 'Video', autoFmt: 'mp4',
+                note: () => 'Direct video file — downloaded and remuxed if needed' },
             { key: 'mv', name: 'Movie site', icon: 'film', brand: 'video', group: 'streams', cls: 'mv', test: u => isMovi(u), autoMode: () => 'Video',
-                autoFmt: 'mp4', note: () => 'Movie/stream site — trying all extractors' },
+                autoFmt: 'mp4', note: () => 'Works when the page exposes a downloadable, non-DRM stream' },
         ];
 
         /* The hero used to carry a Sites button that opened a panel of the same
@@ -7608,6 +7621,37 @@
                 return;
             }
             openPathDialog();
+        }
+
+        /* ══ OPTIONAL BROWSER VIEW ══
+           The native desktop window is the primary app. Its companion browser
+           view is available only when the user asks for it; launching IDLR never
+           opens a second browser window by itself. */
+        async function openBrowserView() {
+            if (!window.__TAURI__?.core?.invoke) {
+                toast('The browser view is available from the installed desktop app.', 'err');
+                return false;
+            }
+            const button = document.getElementById('open-browser-btn');
+            if (button?.disabled) return false;
+            if (button) {
+                button.disabled = true;
+                button.setAttribute('aria-busy', 'true');
+            }
+            try {
+                await window.__TAURI__.core.invoke('open_browser_view');
+                toast('IDLR web view opened in your default browser.', 'ok');
+                return true;
+            } catch (error) {
+                toast((typeof error === 'string' ? error : error?.message)
+                    || 'Could not open the IDLR web view.', 'err');
+                return false;
+            } finally {
+                if (button) {
+                    button.disabled = false;
+                    button.removeAttribute('aria-busy');
+                }
+            }
         }
 
         /* ══ COPY IDLR URL ══ */
@@ -8289,6 +8333,11 @@
                 const networkSub = document.getElementById('sp-network-sub');
                 const networkLabel = document.getElementById('info-network-label');
                 const browserMode = Boolean(d.frozen);
+                const openBrowserButton = document.getElementById('open-browser-btn');
+                /* Only the native window can launch the companion browser view —
+                   in the browser itself the bridge is absent and the button could
+                   only fail, so it stays hidden there. */
+                if (openBrowserButton) openBrowserButton.hidden = !(browserMode && window.__TAURI__?.core?.invoke);
                 if (networkTitle) networkTitle.textContent = browserMode ? 'Browser URL' : 'Network URL';
                 if (networkSub) networkSub.textContent = browserMode
                     ? 'Open on this PC while IDLR is running'

@@ -10,7 +10,7 @@ Everything runs locally on your machine.
 ![yt‑dlp](https://img.shields.io/badge/yt--dlp-latest-orange)
 ![spotdl](https://img.shields.io/badge/spotdl-latest-brightgreen)
 
-> **Current version: v2.0.10** — a native Tauri desktop app with a bundled media worker, plus a local browser option. Both use the same features and local data, with layouts designed for their respective screens.
+> **Current version: v2.0.11** — a native Tauri desktop app with a bundled media worker, plus a local browser option you open on purpose. Both use the same features and local data, with layouts designed for their respective screens.
 
 [Download the latest Windows setup](https://github.com/Makerxm800/IDLR-App/releases/latest/download/IDLR-App-Setup.exe) · [All releases](https://github.com/Makerxm800/IDLR-App/releases)
 
@@ -49,15 +49,15 @@ The release page keeps the main downloads easy to find: Windows, Linux, and macO
 | Facebook | ✅    | ✅    |  |
 | Reddit   | ✅    | ✅    |  |
 | Dailymotion | ✅ | ✅    |  |
-| HLS / `.m3u8` streams | ✅ | ✅ | Merged via FFmpeg |
-| Direct `.mp4/.mkv/.webm` files | ✅ | ✅ | Downloaded directly |
+| HLS / `.m3u8` streams | ✅ | ✅ | Public or authorized non-DRM streams; merged/remuxed via FFmpeg |
+| Direct `.mp4/.mkv/.webm` files | ✅ | ✅ | Downloaded directly; remuxed when you choose a different container |
 | + 1000 more via `yt‑dlp` | ✅ | ✅ | Generic extractor fallback |
 
 ---
 
 ## 🚀 IDLR App for Desktop
 
-The installed app is a native Tauri window with a desktop sidebar and workspace layout. On startup it can also open a browser view at a private, randomly assigned `127.0.0.1` address; that view uses a responsive web layout. Both views use the same local account, history, settings, and download services, so you can keep either or both open. The Settings panel's **Browser URL** button copies the address. The bridge only listens on this PC and checks the request origin. A bundled background worker runs media downloads; the installed app does not require a separate Python installation.
+The installed app opens as a native Tauri window with a desktop sidebar and workspace layout. It does **not** launch a second browser window automatically. If you want the responsive web view, open **Settings → System → Browser URL → Open**; the loopback address is private and randomly assigned, and **Copy** puts it on your clipboard. The browser view uses the same local accounts, history and download services as the desktop app. Its bridge listens only on this PC and checks the request origin. A bundled background worker runs media downloads; the installed app does not require a separate Python installation. History's **Show in folder** action is handled by the native app and opens the recorded file or its containing folder.
 
 - **Windows:** build the `IDLR_*_x64-setup.exe` NSIS installer for 64-bit Intel/AMD Windows. Windows ARM laptops can use this installer through Windows x64 emulation. This release does not provide a 32-bit Windows installer. It registers an uninstaller and upgrades an existing installation when rerun. Find the installer under `src-tauri/target/release/bundle/nsis/`.
 - **Linux:** build `.deb` and `.AppImage` bundles on Linux.
@@ -273,6 +273,15 @@ idlr/
 ---
 
 ## 📜 Changelog
+
+### v2.0.11 — the browser asks first, and the folder button exists
+
+- **The browser view is opt-in.** Starting the app used to spawn a browser window beside the native window on every launch. The `open_browser(&browser_url)` call in setup is gone; the loopback browser service still starts (it shares the app's accounts, history and downloads), but nothing opens until you press **Settings → System → Browser URL → Open**, which invokes a new registered `open_browser_view` command. The button renders only inside the native window — in the browser view itself there is no bridge to invoke, so showing it there would be offering a button that can only fail. The pywebview fallback path (`--browser`) keeps its explicit opt-in too.
+- **`Show in folder` is a real route now.** The history row posts `POST /api/reveal`, but the native API dispatcher had no handler for it, so every click fell through to the catch-all and answered *"Unknown IDLR command."* — the button could never have worked in the installed app. `reveal_request` is now dispatched like accounts and history, and `resolve_reveal_target` opens the exact recorded file (`explorer /select`, `open -R`) when it sits inside its recorded download folder, the folder itself when the file has moved, and refuses paths IDLR never saved into — with both sides of the comparison normalised through one helper, so `~/Music`, `%USERPROFILE%\Music` and the resolved path are one folder.
+- **HLS and movie downloads stop lying.** Three separate bugs made streams unreliable: detection compared the *whole URL* against extensions, so a signed `master.m3u8?token=…` never took the stream path; quality was ignored on that path (`format = best` unconditionally); and `skip_unavailable_fragments` defaulted on, so a dropped segment was skipped and the job still reported done — a movie that "finished" with minutes missing. Detection now reads the extension before query/fragment data, HLS honours the chosen height (`bestvideo[height<=720]+bestaudio/…`), and a missing segment is retried (`fragment_retries: 10`) and then fails visibly.
+- **Direct links keep your format.** The old direct-URL branch forced `merge_output_format = mp4` on everything — including Audio Only mode, which turned a requested MP3 back into a video file. Audio mode now extracts audio from the stream (an HLS rendition is usually muxed, not audio-only), and video remuxes only when the chosen container differs from the source.
+- **History rows point at the real file.** Finished downloads record the path yt-dlp actually reported through its progress and postprocessor hooks, accepted only when it exists inside the job's own download folder — so `Show in folder` opens the file that was just written, never a guess.
+- **Guards:** `DirectMediaDownloadTests` covers signed-URL detection, HLS quality/container selection, audio-mode extraction and output-path containment; new Rust tests cover reveal resolution (recorded file, folder alias, refusal of an arbitrary folder); `test_frontend.py` pins that no code path calls `open_browser` at startup and that `/api/reveal` has a native dispatch.
 
 ### v2.0.10 — the buttons do the thing they say
 
