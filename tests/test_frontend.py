@@ -188,6 +188,30 @@ class FrontendConsistencyTests(unittest.TestCase):
             f"v{version} has no What's-New entry at the top of the changelog",
         )
 
+    def test_native_browser_view_is_opened_only_by_an_explicit_button(self):
+        """The native window must not launch a second browser at startup."""
+        rust = (INDEX.parent / "src-tauri" / "src" / "lib.rs").read_text(encoding="utf-8")
+        self.assertNotIn("open_browser(&browser_url)", rust,
+                         "the native app still opens the web view during setup")
+        self.assertIn("fn open_browser_view", rust)
+        self.assertIn("open_browser_view,", rust,
+                      "the user action is not registered as a Tauri command")
+        self.assertIn('id="open-browser-btn"', self.markup)
+        self.assertIn('onclick="openBrowserView()"', self.markup)
+        self.assertIn("invoke('open_browser_view')", self.html)
+        self.assertIn("openBrowserButton.hidden = !(browserMode && window.__TAURI__?.core?.invoke)", self.html,
+                      "the browser action should appear only in the native desktop window")
+
+    def test_native_history_reveal_has_a_real_command_route(self):
+        """A folder click in the native app must not fall through to the generic
+        `Unknown IDLR command` response — the Python-only route was missing from
+        the desktop API dispatcher."""
+        rust = (INDEX.parent / "src-tauri" / "src" / "lib.rs").read_text(encoding="utf-8")
+        self.assertIn('route != "/api/reveal"', rust)
+        self.assertIn("reveal_request(state, &method, url, route, &body)", rust)
+        self.assertIn("resolve_reveal_target(", rust)
+        self.assertIn("open_reveal_target(&target)", rust)
+
     def test_indicator_elements_are_not_display_hidden(self):
         """A `display:none` indicator silently kills the whole animation."""
         for selector in (".tab-indicator", ".hist-indicator"):

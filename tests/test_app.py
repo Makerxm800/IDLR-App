@@ -269,6 +269,15 @@ class IDLRApiTests(unittest.TestCase):
         ):
             idlr._print_startup(43210, desktop=True)
 
+    def test_desktop_fallback_does_not_automatically_open_a_browser(self):
+        with (
+            mock.patch.dict(idlr.sys.modules, {"webview": None}),
+            mock.patch.object(idlr, "_serve_in_browser") as serve,
+            mock.patch.object(idlr, "log"),
+        ):
+            idlr._run_desktop()
+        serve.assert_called_once_with("127.0.0.1", 5000, auto_open=False)
+
     def test_profile_images_are_validated_and_keep_add_order(self):
         self.create_account()
         first = self.image_data(b"first")
@@ -368,6 +377,97 @@ class IDLRApiTests(unittest.TestCase):
                 self.assertEqual(progress.status_code, 200)
                 self.assertTrue(progress.json["done"])
                 self.assertEqual(progress.json["status"], "done")
+
+
+class DirectMediaDownloadTests(unittest.TestCase):
+    def test_signed_hls_and_direct_video_urls_keep_their_media_extension(self):
+        self.assertEqual(
+            idlr._direct_media_extension("https://cdn.example/master.M3U8?token=x#t=15"),
+            ".m3u8",
+        )
+        self.assertEqual(
+            idlr._direct_media_kind("https://cdn.example/master.m3u8?token=x#t=15"),
+            "hls",
+        )
+        self.assertEqual(
+            idlr._direct_media_kind("https://cdn.example/movie.MKV?sig=x"),
+            "video",
+        )
+        self.assertFalse(idlr.is_hls_or_direct("https://example.com/watch/movie"))
+
+    def test_hls_download_honors_quality_and_remuxes_to_the_requested_container(self):
+        options = {
+            "format": "old selector",
+            "merge_output_format": "mp4",
+            "writethumbnail": True,
+            "postprocessors": [{"key": "EmbedThumbnail"}],
+        }
+        configured = idlr._configure_direct_media_opts(
+            options, "hls", ".m3u8", False, "mkv", "720p")
+
+        self.assertTrue(configured)
+        self.assertEqual(
+            options["format"],
+            "bestvideo[height<=720]+bestaudio/best[height<=720]/best",
+        )
+        self.assertEqual(options["merge_output_format"], "mkv")
+        self.assertEqual(options["postprocessors"], [
+            {"key": "FFmpegVideoRemuxer", "preferedformat": "mkv"},
+        ])
+        self.assertFalse(options["writethumbnail"])
+
+    def test_direct_hls_audio_keeps_audio_extraction_instead_of_becoming_video(self):
+        options = {
+            "format": "bestaudio",
+            "merge_output_format": "mp4",
+            "writethumbnail": True,
+            "postprocessors": [
+                {"key": "FFmpegExtractAudio", "preferredcodec": "mp3"},
+                {"key": "EmbedThumbnail"},
+            ],
+        }
+        idlr._configure_direct_media_opts(
+            options, "hls", ".m3u8", True, "mp3", "320k")
+
+        self.assertEqual(options["format"], "best")
+        self.assertNotIn("merge_output_format", options)
+        self.assertEqual(options["postprocessors"], [
+            {"key": "FFmpegExtractAudio", "preferredcodec": "mp3"},
+        ])
+        self.assertFalse(options["writethumbnail"])
+
+    def test_direct_file_avoids_a_needless_remux_and_thumbnail_postprocessor(self):
+        options = {
+            "format": "old selector",
+            "writethumbnail": True,
+            "postprocessors": [{"key": "EmbedThumbnail"}],
+        }
+        idlr._configure_direct_media_opts(
+            options, "video", ".mp4", False, "mp4", "1080p")
+
+        self.assertEqual(options["format"], "best")
+        self.assertEqual(options["merge_output_format"], "mp4")
+        self.assertEqual(options["postprocessors"], [])
+        self.assertFalse(options["writethumbnail"])
+
+    def test_ytdlp_hooks_record_the_final_file_for_history_without_guessing(self):
+        with tempfile.TemporaryDirectory() as folder, tempfile.TemporaryDirectory() as elsewhere:
+            source = os.path.join(folder, "movie.ts")
+            final = os.path.join(folder, "movie.mp4")
+            outside = os.path.join(elsewhere, "unrelated.mp4")
+            for path in (source, final, outside):
+                Path(path).write_bytes(b"video")
+
+            job = {}
+            idlr._hook(job, {"status": "finished", "filename": source})
+            self.assertEqual(idlr._job_output_file(job, folder), source)
+            idlr._postprocessor_hook(job, {
+                "status": "finished", "info_dict": {"filepath": final},
+            })
+            self.assertEqual(idlr._job_output_file(job, folder), final)
+            job["file_path"] = outside
+            self.assertEqual(idlr._job_output_file(job, folder), "",
+                             "a history row must never point outside its download folder")
 
 
 class DownloadProvenanceTests(unittest.TestCase):
