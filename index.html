@@ -5,7 +5,15 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>IDLR App — Internet Downloader</title>
     <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
-    <link href="https://fonts.googleapis.com/css2?family=Unbounded:wght@600;700;900&family=DM+Sans:wght@300;400;500;600&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet" />
+    <!-- Fonts must never hold the first paint hostage. A plain stylesheet link
+         blocks rendering until Google answers — on a slow or offline machine
+         the app window sat blank for seconds before showing anything. Preload
+         the stylesheet so it starts immediately, apply it asynchronously
+         (media=print -> all on load), and let the system sans stand in until
+         the fonts land (display=swap). The noscript copy keeps no-JS sane. -->
+    <link rel="preload" as="style" href="https://fonts.googleapis.com/css2?family=Unbounded:wght@600;700;900&family=DM+Sans:wght@300;400;500;600&family=DM+Mono:wght@400;500&display=swap" />
+    <link href="https://fonts.googleapis.com/css2?family=Unbounded:wght@600;700;900&family=DM+Sans:wght@300;400;500;600&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet" media="print" onload="this.media='all'" />
+    <noscript><link href="https://fonts.googleapis.com/css2?family=Unbounded:wght@600;700;900&family=DM+Sans:wght@300;400;500;600&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet" /></noscript>
     <style>
         /* ── reset & base ── */
         *,
@@ -4046,18 +4054,18 @@
             width: 100%;
             flex-direction: column;
             align-items: stretch;
-            gap: 5px;
-            padding: 6px;
-            border-radius: 16px;
+            gap: 4px;
+            padding: 4px;
+            border-radius: 14px;
             background: transparent;
             border: 0;
         }
         body.desktop-shell .nav-btn {
             justify-content: flex-start;
-            min-height: 44px;
-            padding: 0 14px 0 20px;
-            border-radius: 12px;
-            font-size: 13px;
+            min-height: 40px;
+            padding: 0 12px 0 14px;
+            border-radius: 10px;
+            font-size: 12.5px;
         }
         body.desktop-shell .nav-btn:hover { transform: none; }
         /* the row fades its own fill in; the accent bar below does the moving */
@@ -4079,8 +4087,12 @@
             box-shadow: 0 0 12px var(--redglow);
         }
         body.desktop-shell .hover-ghost {
-            border-radius: 12px;
-            background: var(--s3);
+            border-radius: 10px;
+            /* The white wash the pointer drags between rows: strong enough to
+               read on the dark rail (the old .04 fill was effectively
+               invisible there), soft enough to stay behind the red accent. */
+            background: rgba(255, 255, 255, .075);
+            border: 1px solid rgba(255, 255, 255, .07);
         }
         body.desktop-shell .nav-btn.pressing > .nav-btn-label {
             transform: scale(.97);
@@ -4088,31 +4100,47 @@
         body.desktop-shell .topbar > div:last-child {
             width: 100%;
             margin: auto 0 0 !important;
-            padding-top: 14px;
+            padding-top: 12px;
             flex-direction: column;
             align-items: stretch !important;
-            gap: 7px !important;
+            gap: 4px !important;
             border-top: 1px solid var(--bdr);
         }
         body.desktop-shell .icon-btn-wrapper,
         body.desktop-shell .notif-wrapper,
         body.desktop-shell .user-chip { width: 100%; }
+        /* Rail action rows (Notifications / Info & help / Settings). They used
+           to be heavy cards stacked on a card — filled boxes with borders on a
+           panel that is already a panel, which is what made them read "big".
+           Now they are quiet ghost rows at rest: the white wash, the brighter
+           label and the animated icon all arrive on hover, and the press is a
+           short squash on the row itself. */
         body.desktop-shell .settings-trigger {
             width: 100%;
-            height: 42px;
+            height: 38px;
             justify-content: flex-start;
-            gap: 12px;
-            padding: 0 12px;
-            border-radius: 12px;
-            background: var(--s3);
-            border: 1px solid var(--bdr);
+            gap: 10px;
+            padding: 0 10px 0 12px;
+            border-radius: 10px;
+            background: transparent;
+            border: 1px solid transparent;
+            backdrop-filter: none;
+            -webkit-backdrop-filter: none;
+            transition: background-color .22s var(--ef), border-color .22s var(--ef),
+                        transform .12s var(--ef);
+        }
+        body.desktop-shell .settings-trigger > .ico {
+            font-size: 16px;
+            color: var(--fg3);
+            transition: transform .34s var(--ef), color .22s var(--ef);
         }
         body.desktop-shell #notif-trigger::after,
         body.desktop-shell #info-trigger::after,
         body.desktop-shell #settings-trigger::after {
-            color: var(--fg2);
+            color: var(--fg3);
             font-size: 12px;
             font-weight: 600;
+            transition: color .22s var(--ef);
         }
         body.desktop-shell #notif-trigger::after { content: "Notifications"; }
         /* In a 228px row the badge belongs at the end of the line, the way a
@@ -4126,18 +4154,57 @@
         body.desktop-shell #info-trigger::after { content: "Info & help"; }
         body.desktop-shell #settings-trigger::after { content: "Settings"; }
         body.desktop-shell .settings-trigger:hover {
-            background: var(--s4);
+            background: rgba(255, 255, 255, .065);
+            border-color: rgba(255, 255, 255, .08);
             transform: none;
+            box-shadow: none;
         }
+        body.desktop-shell .settings-trigger:hover::after { color: var(--fg); }
+        body.desktop-shell .settings-trigger:hover > .ico { color: var(--fg); }
+        /* Press is quick and shallow — the row answers the click, it does not
+           leave a hole where the button was. */
+        body.desktop-shell .settings-trigger:active { transform: scale(.975); }
+        /* Icons that answer a hover: the bell rings once, the gear turns a
+           notch, the info dot leans in. All short, all transform-based, and
+           all collapsed by Calm Motion through the global reduce-motion rule. */
+        @keyframes railBellRing {
+            0% { transform: rotate(0); }
+            30% { transform: rotate(13deg); }
+            55% { transform: rotate(-9deg); }
+            78% { transform: rotate(4deg); }
+            100% { transform: rotate(0); }
+        }
+        body.desktop-shell #notif-trigger:hover > .ico {
+            animation: railBellRing .6s var(--ef);
+            transform-origin: 50% 15%;
+        }
+        body.desktop-shell #settings-trigger:hover > .ico { transform: rotate(48deg); }
+        body.desktop-shell #info-trigger:hover > .ico { transform: scale(1.14); }
         body.desktop-shell .settings-trigger .tooltip,
         body.desktop-shell .chip-btn .tooltip { display: none; }
         body.desktop-shell .chip-btn {
-            min-height: 52px;
+            min-height: 44px;
             width: 100%;
-            padding: 7px;
-            border-radius: 14px;
-            background: var(--s3);
-            border: 1px solid var(--bdr);
+            padding: 6px 10px 6px 6px;
+            border-radius: 10px;
+            background: transparent;
+            border: 1px solid transparent;
+            backdrop-filter: none;
+            -webkit-backdrop-filter: none;
+            transition: background-color .22s var(--ef), border-color .22s var(--ef),
+                        transform .12s var(--ef);
+        }
+        body.desktop-shell .user-chip:hover .chip-btn {
+            background: rgba(255, 255, 255, .065);
+            border-color: rgba(255, 255, 255, .08);
+            transform: none;
+            box-shadow: none;
+        }
+        body.desktop-shell .user-chip:active .chip-btn { transform: scale(.98); }
+        body.desktop-shell .chip-av {
+            width: 30px;
+            height: 30px;
+            font-size: 12px;
         }
         /* Desktop flyouts. A 390px panel anchored inside a 228px rail can only
            ever cover the rows under it, and the rows under the bell are Info,
@@ -6224,6 +6291,13 @@
            the shipped version has no entry — "a visible What's-New entry for every
            release" used to be a rule someone had to remember twice per release. */
         const CHANGELOG = [
+            {
+                ver: '2.0.12', date: '2026-11-20', items: [
+                    ['zap', 'Opens faster', 'The app window used to sit blank while it waited on a font download, and the download helper only started its (slow) self-unpack when you first clicked something. Fonts now load in the background while the interface appears instantly, the window is dark from its very first frame, and the helper warms up while the app opens — so your first click meets it already talking.'],
+                    ['slider', 'The sidebar grew up', 'Notifications, Info & help and Settings were heavy stacked cards. They are slim, quiet rows now: a soft white wash slides in on hover, the row presses gently when you click, and the icons answer — the bell rings once, the gear turns, the info dot leans in.'],
+                    ['sparkles', 'Hovering tabs feels alive', 'Moving the pointer across Download and History drags a visible white highlight between them, instead of the nearly invisible tint it used to be — and the redundant little tooltip that repeated the tab\'s own name over the next row is gone.'],
+                ],
+            },
             {
                 ver: '2.0.11', date: '2026-11-18', items: [
                     ['external', 'The browser opens only when you ask', 'Launching IDLR used to open a second browser window next to the app every single time. It never does that now: the desktop window is the app, and Settings → System → Browser URL has an Open button for the moments you want the web view on purpose.'],
@@ -9062,6 +9136,10 @@
             overlay.style.display = 'flex';
 
             document.querySelectorAll('button:not([title]), button[title=""], [role="tab"]:not([title]), [role="tab"][title=""]').forEach(button => {
+                // Tab buttons wear their label on the button itself; a native
+                // tooltip repeating "History" under the pointer is noise, and
+                // in the sidebar it floats over the row below the one hovered.
+                if (button.closest('.topnav, .hist-tabs')) return;
                 const tooltip = button.querySelector('.tooltip')?.textContent?.trim();
                 const label = button.getAttribute('aria-label')?.trim()
                     || tooltip

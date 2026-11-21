@@ -1,7 +1,7 @@
 {
   "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
   "productName": "IDLR App",
-  "version": "2.0.11",
+  "version": "2.0.12",
   "identifier": "com.idlr.desktop",
   "build": {
     "frontendDist": "../frontend-dist",
@@ -17,7 +17,8 @@
         "minWidth": 800,
         "minHeight": 600,
         "resizable": true,
-        "fullscreen": false
+        "fullscreen": false,
+        "backgroundColor": "#050505"
       }
     ],
     "withGlobalTauri": true,

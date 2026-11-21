@@ -18,7 +18,7 @@ use std::{
 use tauri::{AppHandle, Manager, State};
 use tauri_plugin_updater::UpdaterExt;
 
-const APP_VERSION: &str = "2.0.11";
+const APP_VERSION: &str = "2.0.12";
 const MAX_HTTP_HEADER_BYTES: usize = 16 * 1024;
 const MAX_HTTP_BODY_BYTES: usize = 1024 * 1024;
 static TEMP_FILE_SEQUENCE: AtomicU64 = AtomicU64::new(0);
@@ -1741,6 +1741,34 @@ pub fn run() {
             // The responsive browser view is an opt-in companion. Keep its
             // loopback service ready for the Settings button, but never launch a
             // second window behind the native app on startup.
+            //
+            // Warm the media worker while the window paints. The packaged helper
+            // is a self-extracting binary whose first answer costs seconds; taking
+            // that wait here means the user's first download or Settings visit
+            // meets a helper that is already talking, instead of paying the whole
+            // unpack on the click. A failure is only logged — the health banner
+            // already knows how to explain a helper that is not running.
+            let warm_handle = handle.clone();
+            if let Err(error) = thread::Builder::new()
+                .name("idlr-worker-warmup".into())
+                .spawn(move || {
+                    let state = warm_handle.state::<AppState>();
+                    match api_request_for_state(&state, "GET", "/api/info", Value::Null) {
+                        Ok(response) if response.status == 200 => {
+                            log::info!("IDLR's media worker is warm.")
+                        }
+                        Ok(response) => log::warn!(
+                            "IDLR's media worker answered the warmup with status {}.",
+                            response.status
+                        ),
+                        Err(error) => {
+                            log::warn!("IDLR's media worker warmup failed: {error}")
+                        }
+                    }
+                })
+            {
+                log::warn!("Could not start IDLR's worker warmup: {error}");
+            }
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
