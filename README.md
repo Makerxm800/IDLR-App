@@ -10,7 +10,7 @@ Everything runs locally on your machine.
 ![yt‑dlp](https://img.shields.io/badge/yt--dlp-latest-orange)
 ![spotdl](https://img.shields.io/badge/spotdl-latest-brightgreen)
 
-> **Current version: v2.0.11** — a native Tauri desktop app with a bundled media worker, plus a local browser option you open on purpose. Both use the same features and local data, with layouts designed for their respective screens.
+> **Current version: v2.0.12** — a native Tauri desktop app with a bundled media worker, plus a local browser option you open on purpose. Both use the same features and local data, with layouts designed for their respective screens.
 
 [Download the latest Windows setup](https://github.com/Makerxm800/IDLR-App/releases/latest/download/IDLR-App-Setup.exe) · [All releases](https://github.com/Makerxm800/IDLR-App/releases)
 
@@ -273,6 +273,14 @@ idlr/
 ---
 
 ## 📜 Changelog
+
+### v2.0.12 — faster to open, calmer to look at
+
+- **The window paints instantly now.** The Google Fonts stylesheet was a plain render-blocking `<link>` — on a slow or offline connection the app window sat blank until the request answered or timed out. The stylesheet is preloaded and applied asynchronously (`media="print"` → `all` on load, `display=swap`, `noscript` fallback intact), so the interface paints immediately in the system font and swaps the brand fonts in when they land. The window itself is also painted `--bg` dark from its first frame (`backgroundColor` in the Tauri window config), so there is no white flash before the CSS loads either.
+- **The download helper warms up during launch.** The packaged media worker is a self-extracting binary whose unpack + import costs seconds; that wait used to land on your first download or the first time you opened Settings. A `idlr-worker-warmup` thread now takes the first request during startup, while the window is still appearing — your first click meets a helper that is already talking. A warmup failure is logged, never fatal.
+- **The sidebar rows are ghost controls, not stacked cards.** Notifications / Info & help / Settings and the account row were filled, bordered boxes on a panel that is already a panel — which is what made them read as "all big". They are 38px rows, transparent at rest; hover raises a soft white wash and brightens the label, press is a quick shallow squash, and the icons answer (the bell rings once, the gear turns a notch, the info dot leans in). All of it is transform-based and collapses under the Calm Motion setting.
+- **Tab hover you can actually see.** The hover highlight that follows the pointer across Download / History was a 4%-white fill on a dark rail — effectively invisible. It is a visible white wash with a faint border now, still one sliding element moved by transform. And the boot pass that auto-titled every button no longer adds a native tooltip to tabs: hovering History used to float a second "History" box over the row below it.
+- **Guards:** `RailAndLaunchTests` pins the async font pattern, the ghost-row geometry (transparent at rest, white wash on hover, `.975` press), the hover icon animations (present, transform-based, never infinite), the visible hover wash, the tab-tooltip skip, the dark first frame, and the startup warmup.
 
 ### v2.0.11 — the browser asks first, and the folder button exists
 

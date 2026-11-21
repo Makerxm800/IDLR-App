@@ -7,6 +7,7 @@ handler then does nothing and the button looks dead — and (b) an inline
 invisible to the Python tests, so check them here instead.
 """
 
+import json
 import re
 import unittest
 from pathlib import Path
@@ -554,3 +555,92 @@ class PaintAndGeometryTests(unittest.TestCase):
             self.assertNotIn("Notify when done", line,
                              "promises a system notification from a toggle that only feeds "
                              "the in-app list: " + line)
+
+
+class RailAndLaunchTests(PaintAndGeometryTests):
+    """The desktop rail redesign (v2.0.12) and the launch-speed fixes.
+
+    The rail buttons were heavy filled cards stacked on the rail's own panel —
+    "all big", in the user's words — with an invisible hover ghost and a native
+    tooltip repeating the tab's own label. Launch had two stalls: the Google
+    Fonts stylesheet render-blocked the first paint, and the packaged media
+    worker's self-extraction was paid on the user's first click instead of
+    during startup.
+    """
+
+    def test_fonts_no_longer_block_the_first_paint(self):
+        head = self.html[:self.html.index("</head>")]
+        self.assertIn('rel="preload" as="style"', head,
+                      "the font stylesheet should start downloading immediately")
+        self.assertIn('rel="stylesheet" media="print" onload="this.media=\'all\'"', head,
+                      "the font stylesheet must apply asynchronously — a plain "
+                      "render-blocking link is what left the window blank on "
+                      "slow or offline launches")
+        self.assertIn("display=swap", head,
+                      "without swap, text stays invisible until the fonts arrive")
+        self.assertIn("<noscript>", head,
+                      "no-JS contexts still need the plain stylesheet")
+
+    def test_rail_rows_are_ghosts_that_answer_hover_and_press(self):
+        rest = self.block_after("body.desktop-shell .settings-trigger {",
+                                "the rail row at rest")
+        self.assertIn("background: transparent", rest,
+                      "filled card-on-card rows are what made the rail read 'big'")
+        self.assertIn("border: 1px solid transparent", rest)
+        self.assertIn("height: 38px", rest, "the rail rows should be slimmer than 42px")
+        hover = self.block_after("body.desktop-shell .settings-trigger:hover {",
+                                 "the rail row hover")
+        self.assertIn("rgba(255, 255, 255, .065)", hover,
+                      "the white hover wash the redesign is built around")
+        self.assertIn("transform: none", hover,
+                      "a row that lifts on hover moves the click target from under "
+                      "the pointer — the wash answers instead")
+        press = self.block_after("body.desktop-shell .settings-trigger:active {",
+                                 "the rail row press")
+        self.assertIn("scale(.975)", press,
+                      "a quick shallow squash, not the base rule's deep .92 dive")
+
+    def test_rail_icons_animate_on_hover_but_never_forever(self):
+        for marker, needle in (
+            ("body.desktop-shell #notif-trigger:hover > .ico {", "railBellRing"),
+            ("body.desktop-shell #settings-trigger:hover > .ico {", "rotate(48deg)"),
+            ("body.desktop-shell #info-trigger:hover > .ico {", "scale(1.14)"),
+        ):
+            self.assertIn(needle, self.block_after(marker, marker))
+        bell = self.block_after("body.desktop-shell #notif-trigger:hover > .ico {",
+                                "the bell hover")
+        self.assertNotIn("infinite", bell,
+                         "a bell that rings forever is an alarm, not an answer")
+        self.assertIn("@keyframes railBellRing", self.css)
+        self.assertIn("body.reduce-motion *", self.css,
+                      "Calm Motion must keep collapsing these animations")
+
+    def test_the_rail_hover_wash_is_actually_visible(self):
+        ghost = self.block_after("body.desktop-shell .hover-ghost {",
+                                 "the rail hover ghost")
+        self.assertIn("rgba(255, 255, 255, .075)", ghost,
+                      "the old .04 fill was invisible on the dark rail — hovering a "
+                      "tab looked like nothing happened")
+
+    def test_tabs_do_not_repeat_their_label_as_a_native_tooltip(self):
+        """The auto-title pass made hovering History float a 'History' box over
+        the row below it — the button already says its name."""
+        self.assertIn("button.closest('.topnav, .hist-tabs')", self.html,
+                      "tab buttons must be skipped by the title-attribute pass")
+
+    def test_the_window_never_flashes_white_before_the_page_loads(self):
+        config = json.loads((INDEX.parent / "src-tauri" / "tauri.conf.json")
+                            .read_text(encoding="utf-8"))
+        color = config["app"]["windows"][0].get("backgroundColor")
+        self.assertEqual(color, "#050505",
+                         "the webview background should match --bg so the window "
+                         "is dark from its first frame")
+
+    def test_the_media_worker_is_warmed_during_startup(self):
+        rust = (INDEX.parent / "src-tauri" / "src" / "lib.rs").read_text(encoding="utf-8")
+        self.assertIn("idlr-worker-warmup", rust,
+                      "the onefile helper's unpack should overlap the first paint, "
+                      "not the user's first click")
+        self.assertIn('api_request_for_state(&state, "GET", "/api/info", Value::Null)', rust)
+        self.assertNotIn("warmup.unwrap()", rust,
+                         "a warmup must never be able to take the app down with it")
